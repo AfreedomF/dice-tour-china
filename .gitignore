@@ -1,0 +1,26 @@
+# Dependencies / local caches
+**/node_modules/
+.pnpm-store/
+.cache/
+tmp/
+# Credentials and local game snapshots
+.env
+.env.*
+*.pem
+*.key
+*session*.json
+*save*.json
+*credentials*.json
+# Session verification and logs
+.*write-check
+*.log
+test-results.tap
+test-results.txt
+emqx-probe-result.json
+# Generated intermediate files
+/dist/build/
+tools/plugin-entry.generated.js
+tools/adapt-ui.mjs
+tools/enable-code-join.mjs
+# Release ZIPs are GitHub release assets, not source files
+/dist/*.zip

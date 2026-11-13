@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Dice tour China: City partners",
+    "description": "A 2- or 4-human travel board game using EMQX/WSS and a host-client referee. No standalone game server. Game content is Chinese only."
+  }
+}

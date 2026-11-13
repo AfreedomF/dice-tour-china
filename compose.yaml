@@ -1,0 +1,35 @@
+services:
+  game:
+    build: .
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      DATA_DIR: /app/data
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://127.0.0.1:39570}
+    volumes:
+      - game-data:/app/data
+    ports:
+      - "127.0.0.1:8787:8787"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      GAME_DOMAIN: ${GAME_DOMAIN:?Set GAME_DOMAIN in .env first}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - game
+volumes:
+  game-data:
+  caddy-data:
+  caddy-config:

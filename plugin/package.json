@@ -1,0 +1,10 @@
+{
+  "name": "@local/dice-tour-china",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "description": "中国城市旅行主题，支持两人或四人真人房间的联机桌游。",
+  "exports": { ".": "./index.js", "./client": "./client.js", "./locale/*.json": "./locale/*.json", "./icon": "./icon.svg" },
+  "files": ["index.js", "client.js", "cordis.patch.yml", "locale/*.json", "icon.svg"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" }, "client": { "platform": "web", "immediately": true, "inject": ["@deepseek-ai/dsh-client-ui-conversation"] } }
+}
