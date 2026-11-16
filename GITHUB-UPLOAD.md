@@ -17,7 +17,7 @@ GitHub网页单次上传最多100个文件，本项目准备的包小于该限�
 
 把仓库链接发给朋友，并附这一句：
 
-> 在 DSH 对话里请助手：请从 github:AfreedomF/dice-tour-china 安装骰游中国插件，使用 plugin_manager，先检查是否已安装。
+> 在 DSH 对话里请助手：请按仓库UPDATES.md迁移为GitHub在线来源安装；先检查已有安装，读取仓库main最新完整40位SHA，用 github:AfreedomF/dice-tour-china#该SHA 安装，不要下载ZIP后以本地目录安装。
 
 仓库根目录是DSH bundle，包含现成的plugin/client.js，无需朋友自行构建。
 

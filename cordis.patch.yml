@@ -1,0 +1,4 @@
+- insert:
+    - id: dice-tour-china
+      name: '@local/dice-tour-china'
+      config: {}

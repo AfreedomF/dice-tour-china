@@ -20,4 +20,6 @@ const core=await readFile(path.join(root,'dist/build/plugin-core.js'),'utf8');
 await writeFile(path.join(root,'plugin/client.js'),`window.__ModuleLoader__.load({id:'@local/dice-tour-china',factory(require){const React=require('react');\n${core}\nreturn DiceTourPlugin.default(React);}});\n`);
 await mkdir(path.join(root,'plugin/locale'),{recursive:true});
 for(const [locale,meta] of Object.entries({zh:{title:'骰游中国：城市合伙人',description:'2 人或 4 人真人旅行经营桌游。EMQX/WSS 转发，房主客户端裁判；无需独立游戏服务器。游戏内容仅中文。'},en:{title:'Dice tour China: City partners',description:'A 2- or 4-human travel board game using EMQX/WSS and a host-client referee. No standalone game server. Game content is Chinese only.'}}))await writeFile(path.join(root,`plugin/locale/${locale}.json`),JSON.stringify({meta},null,2)+'\n');
-console.log('Built dist/browser and persistent plugin/client.js; plugin React only from DSH require(react).');
+await mkdir(path.join(root,'locale'),{recursive:true});
+for(const file of ['index.js','client.js','cordis.patch.yml','icon.svg','locale/en.json','locale/zh.json'])await copyFile(path.join(root,'plugin',file),path.join(root,file));
+console.log('Built browser, plugin ZIP directory, and matching GitHub root bundle; React comes from DSH.');

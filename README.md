@@ -2,6 +2,12 @@
 
 中国八城旅行＋小店经营桌游，运行于 DSH Web GUI。支持2/4真人联机，朋友输入昵称和六位房号即可加入，不需要审批或独立游戏服务器。
 
+## 安装后支持检查更新
+
+**要在插件市场收到更新提示，请使用GitHub在线来源安装，不要下载ZIP后安装本地目录。** 本地`link:`/`file:`安装会显示“本地开发”，不会自动变成在线安装。现有用户只需迁移一次，详见 [更新与迁移说明](UPDATES.md)。
+
+DSH Market会在打开/刷新已安装列表时检查GitHub版本；出现新版本后点击更新，按提示刷新。不是GitHub实时推送，也不保证市场关闭期间定时后台检查。公共市场搜索收录还需要第三方目录审核，与在线来源更新是两回事。
+
 ## 朋友如何安装
 
 仓库根目录已经是 DSH bundle，包含构建好的插件，无需朋友安装 Node 或运行构建。
@@ -14,7 +20,7 @@ github:AfreedomF/dice-tour-china
 
 如果安装界面只接受自然语言，可把下面一句发给 DSH 助手：
 
-> 请使用 plugin_manager 从 github:AfreedomF/dice-tour-china 安装骰游中国插件。先检查已有安装；不要安装依赖构建脚本。
+> 请按仓库UPDATES.md迁移/安装骰游中国：先检查已有安装，再读取GitHub默认分支的最新完整40位commit SHA，用 github:AfreedomF/dice-tour-china#该SHA 安装；不要下载ZIP后安装本地目录，不要执行依赖构建脚本。
 
 也可以在 GitHub 仓库点 Code → Download ZIP，完整解压，再让 DSH 助手用解压后的仓库根目录绝对路径执行 install_bundle。不要只复制一个 client.js。
 
