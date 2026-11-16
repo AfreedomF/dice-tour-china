@@ -5,10 +5,10 @@ import {randomInt,randomUUID} from '../shared/random.js';
 import {BOARD,CARDS} from '../shared/content.js';
 
 const NOW=100000;
-function lobby(count=2){const r=createRoom('654321',count,'甲',NOW);while(r.players.length<count)r.players.push(newPlayer(`真人${r.players.length}`,NOW));return r;}
+function lobby(count=2){const r=createRoom('654321',count,'甲',NOW);r.board=structuredClone(BOARD);while(r.players.length<count)r.players.push(newPlayer(`真人${r.players.length}`,NOW));return r;}
 function act(r,p,a,rng=min=>Math.max(min,1)){return applyAction(r,typeof p==='string'?p:p.id,a,{now:NOW,rng});}
 function game(count=2){const r=lobby(count);for(const p of r.players)act(r,p,{type:'ready',ready:true});act(r,r.hostId,{type:'start'});return r;}
-function end(r){const id=r.turnPlayerId;act(r,id,{type:'skip'});act(r,id,{type:'end'});}
+function end(r){const id=r.turnPlayerId;act(r,id,{type:'skip'});}
 function turn(r,steps=1){const id=r.turnPlayerId;act(r,id,{type:'roll'},(min,max)=>min===1?steps:(max===5?1:min));if(r.status==='playing'&&r.turnPlayerId===id)end(r);}
 function rejectUnchanged(r,p,a){const before=structuredClone(r);assert.throws(()=>act(r,p,a),GameError);assert.deepEqual(r,before);}
 function withCrypto(value,run){const descriptor=Object.getOwnPropertyDescriptor(globalThis,'crypto');Object.defineProperty(globalThis,'crypto',{configurable:true,value});try{run();}finally{Object.defineProperty(globalThis,'crypto',descriptor);}}
@@ -38,7 +38,7 @@ test('mutating engine contract: caller clone contains even a partially failed ra
   assert.deepEqual(original,snapshot);assert.equal(draft.phase,'land');assert.equal(draft.players[0].position,4);
 });
 test('one strategy card before roll; failed card use does not consume allowance',()=>{
-  const r=game(),p=r.players[0];p.cards=CARDS.map(c=>c.id);
+  const r=game(),p=r.players[0];p.cards=CARDS.filter(c=>c.id!=='jail_free').map(c=>c.id);
   rejectUnchanged(r,p,{type:'useCard',cardId:'precise',steps:0});assert.equal(r.cardUsed,false);
   act(r,p,{type:'useCard',cardId:'bonus'});assert.equal(p.cash,10500);assert.equal(p.cards.length,4);assert.equal(r.cardUsed,true);
   for(const cardId of p.cards)rejectUnchanged(r,p,{type:'useCard',cardId,steps:2});
@@ -88,7 +88,7 @@ test('city set doubles rent, but mortgaged target earns none and does not consum
   const s=game(),q=s.players[0];s.properties[1]={ownerId:s.players[1].id,level:3,mortgaged:true};q.effects.shield=true;act(s,q,{type:'roll'});assert.equal(q.cash,10000);assert.equal(q.effects.shield,true);
 });
 test('event debt bankruptcy skips eliminated player and resolves final survivor',()=>{
-  const r=game(4),p=r.players[0];p.cash=10;const draws=[4,1,5];act(r,p,{type:'roll'},()=>draws.shift());assert.equal(p.bankrupt,true);assert.equal(r.turnPlayerId,r.players[1].id);assert.equal(r.phase,'roll');
+  const r=game(4),p=r.players[0];p.cash=10;const draws=[4,2,5];act(r,p,{type:'roll'},()=>draws.shift());assert.equal(p.bankrupt,true);assert.equal(r.turnPlayerId,r.players[1].id);assert.equal(r.phase,'roll');
   act(r,r.players[3],{type:'surrender'});assert.equal(r.turnPlayerId,r.players[1].id);act(r,r.players[1],{type:'surrender'});assert.equal(r.status,'finished');assert.equal(r.turnPlayerId,null);assert.equal(r.rankings[0].playerId,r.players[2].id);
 });
 test('last seat bankruptcy wraps round once and never leaves a bankrupt turn',()=>{
@@ -99,17 +99,19 @@ test('net worth uses full face-value buildings minus mortgage redemption obligat
   r.properties[1].level=2;assert.equal(netWorth(r,p),11560);r.properties[2]={ownerId:r.players[1].id,level:3,mortgaged:false};assert.equal(netWorth(r,p),11560);
 });
 test('equal net assets share competition rank independent of stamps; bankrupt always bottom',()=>{
-  const r=game(4);r.maxRounds=1;r.turnPlayerId=r.players[3].id;r.phase='end';r.players[0].cash=20000;r.players[0].bankrupt=true;r.players[1].cash=10000;r.players[1].stamps=['beijing'];r.players[2].cash=10000;r.players[3].cash=9000;
-  act(r,r.players[3],{type:'end'});assert.deepEqual(r.rankings.map(p=>[p.playerId,p.rank]),[[r.players[1].id,1],[r.players[2].id,1],[r.players[3].id,3],[r.players[0].id,4]]);
+ // Restored snapshots can retain assets on eliminated players: finish only
+ // once one survivor remains, but preserve the complete ranking comparator.
+ const r=game(4);r.players[0].cash=5000;for(const p of r.players.slice(1))p.bankrupt=true;r.players[1].cash=10000;r.players[1].stamps=['beijing'];r.players[2].cash=10000;r.players[3].cash=9000;
+ act(r,r.players[0],{type:'roll'},()=>1);assert.equal(r.status,'finished');assert.deepEqual(r.rankings.map(p=>[p.playerId,p.rank]),[[r.players[0].id,1],[r.players[1].id,2],[r.players[2].id,2],[r.players[3].id,4]]);
 });
 for(const count of [2,4])test(`${count}-player deterministic 20-round card/build journey has no deadlocks`,()=>{
-  const r=game(count);let completed=0;while(r.status==='playing'){assert.ok(completed<count*20);const p=r.players.find(p=>p.id===r.turnPlayerId);assert.equal(p.bankrupt,false);assert.equal(r.phase,'roll');
+  const r=game(count);let completed=0;while(completed<count*20){assert.equal(r.status,'playing');const p=r.players.find(p=>p.id===r.turnPlayerId);assert.equal(p.bankrupt,false);assert.equal(r.phase,'roll');
     // Deterministic exact movement with occasional strategy cards and safe budgets.
     if(p.cards.includes('discount')&&!p.effects.discount)act(r,p,{type:'useCard',cardId:'discount'});
     act(r,p,{type:'roll'},min=>Math.max(min,1));if(r.status!=='playing'||r.turnPlayerId!==p.id)continue;
     const t=BOARD[p.position],v=r.properties[t.id];if(t.type==='property'&&(!v||(v.ownerId===p.id&&!v.mortgaged&&v.level<3))&&p.cash>3000)act(r,p,{type:v?'upgrade':'buy'});
     end(r);completed++;
-  }assert.equal(completed,count*20);assert.equal(r.round,21);assert.equal(r.rankings.length,count);assert.equal(r.turnPlayerId,null);
+  }assert.equal(completed,count*20);assert.equal(r.round,21);assert.equal(r.status,'playing');for(const p of r.players.slice(0,-1))act(r,p,{type:'surrender'});assert.equal(r.rankings.length,count);assert.equal(r.turnPlayerId,null);
   for(const row of r.rankings){assert.equal(row.netWorth,netWorth(r,r.players.find(p=>p.id===row.playerId)));assert.ok(row.rank>=1);}
 });
 test('public turn allowances and private effects are copied, not live aliases',()=>{
@@ -123,13 +125,13 @@ test('randomInt rejects biased tail and supports exclusive bounds, negative offs
 });
 test('shop cards cap at 12; event extra rolls never grant cards or suppress rewards',()=>{
   for(const count of [11,12]){const r=game(),p=r.players[0];p.cards=Array(count).fill('bonus');p.position=15;let calls=0;act(r,p,{type:'roll'},()=>++calls===1?1:0);assert.equal(p.cards.length,12);}
-  for(const count of [11,12]){const r=game(),p=r.players[0];p.cards=Array(count).fill('bonus');p.position=3;let calls=0;act(r,p,{type:'roll'},()=>++calls===1?1:2);assert.equal(p.cards.length,count);assert.equal(p.extraRolls,1);}
+  for(const count of [11,12]){const r=game(),p=r.players[0];p.cards=Array(count).fill('bonus');p.position=3;let calls=0;act(r,p,{type:'roll'},()=>++calls===1?1:4);assert.equal(p.cards.length,count);assert.equal(p.extraRolls,1);}
   const r=game(),p=r.players[0];p.cards=Array(12).fill('bonus');p.position=3;const draws=[1,0,5];act(r,p,{type:'roll'},()=>draws.shift());assert.equal(p.cash,10500);assert.equal(p.cards.length,12);
 });
 test('remaining players complete 20 rounds with multiple eliminated seats, including host',()=>{
   const r=game(4);act(r,r.players[0],{type:'surrender'});act(r,r.players[2],{type:'surrender'});let turns=0;
-  while(r.status==='playing'){assert.ok(turns<40);const p=r.players.find(p=>p.id===r.turnPlayerId);assert.equal(p.bankrupt,false);turn(r);turns++;}
-  assert.equal(turns,40);assert.equal(r.round,21);assert.deepEqual(r.rankings.slice(-2).map(p=>p.bankrupt),[true,true]);assert.equal(r.rankings.at(-1).rank,r.rankings.at(-2).rank);
+  while(turns<40){assert.equal(r.status,'playing');const p=r.players.find(p=>p.id===r.turnPlayerId);assert.equal(p.bankrupt,false);turn(r);turns++;}
+  assert.equal(turns,40);assert.equal(r.round,21);assert.equal(r.status,'playing');act(r,r.players[1],{type:'surrender'});assert.deepEqual(r.rankings.slice(-2).map(p=>p.bankrupt),[true,true]);assert.equal(r.rankings.at(-1).rank,r.rankings.at(-2).rank);
 });
 test('UUID uses Web Crypto native or RFC4122 v4 fallback (no Node imports)',()=>{
   withCrypto({randomUUID:()=> 'native-uuid'},()=>assert.equal(randomUUID(),'native-uuid'));

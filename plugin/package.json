@@ -1,6 +1,6 @@
 {
   "name": "@local/dice-tour-china",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "中国城市旅行主题，支持两人或四人真人房间的联机桌游。",

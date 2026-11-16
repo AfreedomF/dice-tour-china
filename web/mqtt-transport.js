@@ -230,7 +230,7 @@ export function createTransport(options = {}) {
     const identity = await createIdentity();
     // Rejection sampling avoids modulo bias for the six-digit invitation code.
     let n; do { n = parseInt(randomHex(4),16); } while (n >= 4294800000);
-    const code = String(100000 + n % 900000), snapshot = createRoom(code,capacity,name,now());
+    const code = String(100000 + n % 900000), snapshot = createRoom(code,capacity,name,now(),{rng:options.boardRng});
     session = {protocol:1,host:true,code,secret:secretOf(secret ?? await codeKey(code)),joinMode:secret?'invite':'code',epoch:randomHex(16),hostKey:identity.id,identity,playerId:snapshot.hostId,snapshot,identities:{[identity.id]:{playerId:snapshot.hostId,signKey:identity.signPublic,dhKey:identity.dhPublic,lastSeq:0}},receipts:[],hostSeq:0,seq:0};
     save(); await begin(); view(); return result();
   }

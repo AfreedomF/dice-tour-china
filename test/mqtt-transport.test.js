@@ -9,7 +9,7 @@ async function setup(t,capacity=2,extra={}) {
   const broker = new FakeBroker(), states=[], sessions=[], clients=[];
   let clock=100000;
   const make = () => {
-    const transport=createTransport({connect:broker.connect,timeoutMs:600,heartbeatMs:60000,now:()=>clock,rng:(min)=>min,...extra,onStatus:s=>states.push(s),onSession:s=>sessions.push(s)});
+    const transport=createTransport({connect:broker.connect,timeoutMs:600,heartbeatMs:60000,now:()=>clock,boardRng:(min,max)=>max-1,rng:(min)=>min,...extra,onStatus:s=>states.push(s),onSession:s=>sessions.push(s)});
     clients.push(transport); return transport;
   };
   t.after(()=>clients.forEach(c=>c.disconnect()));

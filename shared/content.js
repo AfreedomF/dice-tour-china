@@ -20,5 +20,6 @@ export const CARDS = [
   {id:'slow',name:'慢游卡',description:'掷骰前使用，下一次骰子随机为 1～3 步。'},
   {id:'discount',name:'优惠券',description:'掷骰前使用，下一次购买或升级费用减半；未消费则保留，不能叠加。'},
   {id:'shield',name:'免租卡',description:'使用后自动抵挡下一笔租金，直到触发前一直有效。'},
-  {id:'bonus',name:'旅行补贴',description:'立即获得 500 元旅行补贴。'}
+  {id:'bonus',name:'旅行补贴',description:'立即获得 500 元旅行补贴。'},
+  {id:'jail_free',name:'出狱卡',description:'仅在本次坐牢停留时使用，取消下次轮空；不占策略卡名额，仅由事件获得。'}
 ];
