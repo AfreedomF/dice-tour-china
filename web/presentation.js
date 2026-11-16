@@ -35,6 +35,10 @@ export function rollTransition(previous,next) {
   const before=previous.players?.find(p=>p.id===previous.turnPlayerId);
   const after=next.players?.find(p=>p.id===previous.turnPlayerId);
   if(!before||!after||previous.status!=='playing')return null;
+  const movement=next.lastMove;
+  if(movement&&movement.id!==previous.lastMove?.id&&movement.playerId===before.id){
+    return {playerId:before.id,from:movement.from,to:movement.to,path:forwardPath(movement.from,movement.landed),value:movement.steps,teleport:movement.to!==movement.landed};
+  }
   const path=forwardPath(before.position,after.position);
   const rolled=path.length>0 || (previous.phase==='roll'&&next.phase!=='roll'&&Number(next.lastDice)>0);
   return rolled?{playerId:before.id,from:before.position,to:after.position,path,value:Number(next.lastDice)||path.length}:null;

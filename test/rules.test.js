@@ -6,10 +6,10 @@ import {BOARD,CARDS} from '../shared/content.js';
 
 const NOW=100000;
 function lobby(count=2){const r=createRoom('654321',count,'甲',NOW);while(r.players.length<count)r.players.push(newPlayer(`真人${r.players.length}`,NOW));return r;}
-function act(r,p,a,rng=()=>1){return applyAction(r,typeof p==='string'?p:p.id,a,{now:NOW,rng});}
+function act(r,p,a,rng=min=>Math.max(min,1)){return applyAction(r,typeof p==='string'?p:p.id,a,{now:NOW,rng});}
 function game(count=2){const r=lobby(count);for(const p of r.players)act(r,p,{type:'ready',ready:true});act(r,r.hostId,{type:'start'});return r;}
 function end(r){const id=r.turnPlayerId;act(r,id,{type:'skip'});act(r,id,{type:'end'});}
-function turn(r,steps=1){const id=r.turnPlayerId;act(r,id,{type:'roll'},()=>steps);if(r.status==='playing'&&r.turnPlayerId===id)end(r);}
+function turn(r,steps=1){const id=r.turnPlayerId;act(r,id,{type:'roll'},(min,max)=>min===1?steps:(max===5?1:min));if(r.status==='playing'&&r.turnPlayerId===id)end(r);}
 function rejectUnchanged(r,p,a){const before=structuredClone(r);assert.throws(()=>act(r,p,a),GameError);assert.deepEqual(r,before);}
 function withCrypto(value,run){const descriptor=Object.getOwnPropertyDescriptor(globalThis,'crypto');Object.defineProperty(globalThis,'crypto',{configurable:true,value});try{run();}finally{Object.defineProperty(globalThis,'crypto',descriptor);}}
 
@@ -88,7 +88,7 @@ test('city set doubles rent, but mortgaged target earns none and does not consum
   const s=game(),q=s.players[0];s.properties[1]={ownerId:s.players[1].id,level:3,mortgaged:true};q.effects.shield=true;act(s,q,{type:'roll'});assert.equal(q.cash,10000);assert.equal(q.effects.shield,true);
 });
 test('event debt bankruptcy skips eliminated player and resolves final survivor',()=>{
-  const r=game(4),p=r.players[0];p.cash=10;let n=0;act(r,p,{type:'roll'},()=>++n===1?4:1);assert.equal(p.bankrupt,true);assert.equal(r.turnPlayerId,r.players[1].id);assert.equal(r.phase,'roll');
+  const r=game(4),p=r.players[0];p.cash=10;const draws=[4,1,5];act(r,p,{type:'roll'},()=>draws.shift());assert.equal(p.bankrupt,true);assert.equal(r.turnPlayerId,r.players[1].id);assert.equal(r.phase,'roll');
   act(r,r.players[3],{type:'surrender'});assert.equal(r.turnPlayerId,r.players[1].id);act(r,r.players[1],{type:'surrender'});assert.equal(r.status,'finished');assert.equal(r.turnPlayerId,null);assert.equal(r.rankings[0].playerId,r.players[2].id);
 });
 test('last seat bankruptcy wraps round once and never leaves a bankrupt turn',()=>{
@@ -106,7 +106,7 @@ for(const count of [2,4])test(`${count}-player deterministic 20-round card/build
   const r=game(count);let completed=0;while(r.status==='playing'){assert.ok(completed<count*20);const p=r.players.find(p=>p.id===r.turnPlayerId);assert.equal(p.bankrupt,false);assert.equal(r.phase,'roll');
     // Deterministic exact movement with occasional strategy cards and safe budgets.
     if(p.cards.includes('discount')&&!p.effects.discount)act(r,p,{type:'useCard',cardId:'discount'});
-    act(r,p,{type:'roll'},()=>1);if(r.status!=='playing'||r.turnPlayerId!==p.id)continue;
+    act(r,p,{type:'roll'},min=>Math.max(min,1));if(r.status!=='playing'||r.turnPlayerId!==p.id)continue;
     const t=BOARD[p.position],v=r.properties[t.id];if(t.type==='property'&&(!v||(v.ownerId===p.id&&!v.mortgaged&&v.level<3))&&p.cash>3000)act(r,p,{type:v?'upgrade':'buy'});
     end(r);completed++;
   }assert.equal(completed,count*20);assert.equal(r.round,21);assert.equal(r.rankings.length,count);assert.equal(r.turnPlayerId,null);
@@ -121,9 +121,10 @@ test('randomInt rejects biased tail and supports exclusive bounds, negative offs
   let draws=0;withCrypto({getRandomValues(words){words[0]=0xffff;words[1]=++draws===1?0xffffffff:0xfffffffe;return words;}},()=>assert.equal(randomInt(0,2**48-1),2**48-2));assert.equal(draws,2);
   for(const [min,max] of [[0,0],[2,1],[0,2**48],[NaN,2],[1.5,3],[0,Infinity],[0,Number.MAX_SAFE_INTEGER+1]])assert.throws(()=>randomInt(min,max),RangeError);
 });
-test('event/shop cards cap at 12 without suppressing other event rewards',()=>{
-  for(const tile of [4,16])for(const count of [11,12]){const r=game(),p=r.players[0];p.cards=Array(count).fill('bonus');p.position=tile-1;let calls=0;act(r,p,{type:'roll'},()=>++calls===1?1:(tile===4&&calls===2?2:0));assert.equal(p.cards.length,12);}
-  const r=game(),p=r.players[0];p.cards=Array(12).fill('bonus');p.position=3;let calls=0;act(r,p,{type:'roll'},()=>++calls===1?1:0);assert.equal(p.cash,10500);assert.equal(p.cards.length,12);
+test('shop cards cap at 12; event extra rolls never grant cards or suppress rewards',()=>{
+  for(const count of [11,12]){const r=game(),p=r.players[0];p.cards=Array(count).fill('bonus');p.position=15;let calls=0;act(r,p,{type:'roll'},()=>++calls===1?1:0);assert.equal(p.cards.length,12);}
+  for(const count of [11,12]){const r=game(),p=r.players[0];p.cards=Array(count).fill('bonus');p.position=3;let calls=0;act(r,p,{type:'roll'},()=>++calls===1?1:2);assert.equal(p.cards.length,count);assert.equal(p.extraRolls,1);}
+  const r=game(),p=r.players[0];p.cards=Array(12).fill('bonus');p.position=3;const draws=[1,0,5];act(r,p,{type:'roll'},()=>draws.shift());assert.equal(p.cash,10500);assert.equal(p.cards.length,12);
 });
 test('remaining players complete 20 rounds with multiple eliminated seats, including host',()=>{
   const r=game(4);act(r,r.players[0],{type:'surrender'});act(r,r.players[2],{type:'surrender'});let turns=0;
