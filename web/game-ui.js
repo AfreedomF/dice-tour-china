@@ -1,5 +1,6 @@
 /* Shared browser / DSH UI. React is supplied by the host; transport is bundled. */
 import {tileDetails} from './tile-details.js';
+import {liquidationValue,ownedPropertyAssets,playerNetWorth} from './finance-helpers.js';
 import {createTransport} from './mqtt-transport.js';
 import mqtt from 'mqtt';
 import {boardPlace, pawnPosition, dicePips, rollTransition} from './presentation.js';
@@ -35,7 +36,7 @@ export function createGameUI(React, content, translate=s=>s) {
   const cardList = Array.isArray(content.CARDS) ? content.CARDS : Object.entries(content.CARDS || {}).map(([id,c])=>({id,...c}));
   const cardsById = Object.fromEntries(cardList.map(c=>[c.id,c]));
   const colors = ['#d66b4f','#3e92b8','#8b76bf','#c49935'];
-  const icons = {start:'🧳',event:'✉️',station:'🚄',shop:'🎁',park:'🌳'};
+  const icons = {start:'🧳',event:'✉️',station:'🚄',shop:'🎁',park:'🎁'};
   const cardIcons = {precise:'🎯',slow:'🐢',discount:'🎟️',shield:'🛡️',bonus:'🧧',jail_free:'🔓'};
   const money = n => '¥' + Number(n || 0).toLocaleString('zh-CN');
   const normalizeServer = value => {const u=new URL(value);if(u.protocol!=='wss:'||u.username||u.password)throw new Error('请输入 WSS Broker 地址；账号密码请填入独立字段。');return u.href;};
@@ -109,7 +110,10 @@ h('button',{'aria-label':'关闭对话框',onClick:onClose,className:'quiet'},'�
     const players=room?.players||[],me=players.find(p=>p.id===auth?.playerId),turn=players.find(p=>p.id===room?.turnPlayerId),myTurn=!!me&&room?.turnPlayerId===me.id;
     const offline=room?.status==='playing'&&(connection!=='online'||players.some(p=>!p.bankrupt&&!p.online));
     const locked=busy||animating||rolling||!!eventPopup||connection!=='online'||offline;
-    const canAct=!!me&&myTurn&&!me.bankrupt&&room?.status==='playing'&&!locked;
+    const debt=room?.phase==='debt'?room.debt:null;
+    const myDebt=!!debt&&debt.playerId===me?.id;
+    const canFinance=!!me&&!me.bankrupt&&room?.status==='playing'&&!locked&&(myDebt||(!debt&&myTurn));
+    const canAct=!!me&&myTurn&&!me.bankrupt&&room?.status==='playing'&&!locked&&!debt;
     const host=me?.id===room?.hostId;
     const route=room?.board??BOARD;
     const [hovered,setHovered]=useState(null),[focused,setFocused]=useState(null),[dismissed,setDismissed]=useState(false);
@@ -118,7 +122,7 @@ h('button',{'aria-label':'关闭对话框',onClick:onClose,className:'quiet'},'�
     const tile=detail?.tile;
     const preview=tileDetails(room,hovered??focused,route);
     const showPreview=!dismissed&&!!preview;
-    const tileDescription=t=>cities[t.city]?cities[t.city].name+' · 城市地标':{start:'途经起点领取补给；返起点事件不领取奖励',event:'奖励/罚款/再掷/坐牢各20%，返回起点/出狱卡各10%',station:'高铁出行补贴',shop:'随机获得旅行卡，手牌上限12张',park:'公园休憩补贴'}[t.type];
+    const tileDescription=t=>cities[t.city]?cities[t.city].name+' · 城市地标':{start:'途经起点领取补给；返起点事件不领取奖励',event:'奖励/罚款/再掷/坐牢各20%，返回起点/出狱卡各10%',station:'免费直达下一座高铁站，不递归触发、不发200补贴，跨起点无奖励',shop:'随机获得旅行卡，手牌上限12张',park:'旅行商店：随机获得旅行卡，手牌上限12张'}[t.type];
     const prop=room?.properties?.[tile?.id],owner=players.find(p=>p.id===prop?.ownerId);
     const myTile=route.find(t=>Number(t.id)===Number(me?.position));
     const currentProp=room?.properties?.[myTile?.id];
@@ -133,7 +137,9 @@ h('button',{'aria-label':'关闭对话框',onClick:onClose,className:'quiet'},'�
     }
     async function resumeSaved(){if(!saved||busyRef.current)return;clearAnimation();roomRef.current=null;busyRef.current=true;setBusy(true);setError('');try{const url=normalizeServer(saved.brokerUrl||serverInput);setServer(url);setServerInput(url);const t=makeTransport(url);const data=await t.resume(saved);persist(t.getSession());mergeRoom(data.room);}catch(e){transport.current?.disconnect();setAuth(null);setRoom(null);setError('恢复失败：'+e.message);setConnection('error');}finally{busyRef.current=false;setBusy(false);}}
     async function act(type,extra={}){
-      if(busyRef.current||animation.current.locked||!auth||!room||eventPopup)return;busyRef.current=true;setBusy(true);setError('');
+      if(busyRef.current||animation.current.locked||!auth||!room||eventPopup)return;
+      if(room.phase==='debt'&&!['mortgage','sellLevel','settleDebt','declareBankruptcy','surrender'].includes(type))return;
+      busyRef.current=true;setBusy(true);setError('');
        if(type==='roll'){animation.current.pending=true;animation.current.locked=true;setRolling(true);setAnimating(true);}
       try{const data=await transport.current.action({type,version:room.version,requestId:crypto.randomUUID(),...extra});if(mounted.current)mergeRoom(data.room);}
       catch(e){if(mounted.current)setError(e.message+' 操作不自动重试；先等待同步再操作。');}
@@ -143,18 +149,20 @@ h('button',{'aria-label':'关闭对话框',onClick:onClose,className:'quiet'},'�
     function closeUI(){setModal(null);onClose?.();}
     async function copyInvite(){const text=room.code;try{await navigator.clipboard.writeText(text);setNotice('房间号已复制：'+text+'。朋友填昵称和房间号即可加入；双方使用相同 Broker。');}catch{setNotice('请把房间号 '+text+' 发给朋友，双方使用相同 Broker：'+server);}}
     const actionButton=(text,type,extra={},opts={})=>h('button',{key:type+text,className:opts.primary?'primary':opts.danger?'danger':'',disabled:opts.disabled??(!canAct),onClick:()=>act(type,extra)},text);
-    const phaseText=room?.status==='finished'?'这趟旅程圆满结束':offline?'有旅伴离线 · 对局暂停':connection!=='online'?'正在恢复连接 · 暂停操作':myTurn?({roll:'轮到你了，掷骰开始漫游',land:'到站啦！处理地标或结束停留',end:'停留结束，把旅程交给下一位'}[room?.phase]||'等待房间同步'): '等待 '+(turn?.name||'旅伴')+' 行动';
+    const phaseText=room?.status==='finished'?'这趟旅程圆满结束':offline?'有旅伴离线 · 对局暂停':connection!=='online'?'正在恢复连接 · 暂停操作':myTurn?({roll:'轮到你了，掷骰开始漫游',land:'到站啦！处理地标或结束停留',end:'停留结束，把旅程交给下一位',debt:'待清偿欠款：请管理房产筹款，现金足额后自动结清'}[room?.phase]||'等待房间同步'): '等待 '+(turn?.name||'旅伴')+' 行动';
     const renderRules=()=>h('div',{className:'rules'},h('p',null,'不是机器人陪玩，是与真实旅伴一起的城市大富翁。支持 2 人或 4 人，所有行动以房主客户端判定为准。'),
 h('ol',null,h('li',null,'房主创建 2 人或 4 人房，朋友填昵称和六位房间号直接加入，无需密码或批准。需使用同款新版客户端与相同 Broker；满员或开局后不再接收新玩家。localhost 不能供异地直接访问。'),
 h('li',null,'轮到你时先用旅行卡（可选），再掷骰。每房棋盘随机排布。随机事件：奖励 500～1000 整百元、罚款 500～800 整百元、再掷一次、坐牢下次轮空各 20%；无奖励返回起点并立刻交棒、获得出狱卡各 10%。额外掷骰仍属于同一回合，不增加策略卡次数。'),
 h('li',null,'落地阶段可购买或升级当前地标，完成后点击「结束停留」直接交给下一位；若有额外掷骰则继续掷骰。返回起点事件立即结束本次停留，不再继续掷骰。准确金额与可用行动由房主客户端校验。'),
-h('li',null,'资金紧张时可查看自己的地标，抵押、赎回或出售等级。精准骰子可选 1～6 步。出狱卡仅在自己本次坐牢的落地阶段、结束停留前使用，清除下次轮空；不必先掷骰、不占也不受每回合一张策略卡限制。事件弹窗关闭后到旅行锦囊使用，手牌最多12张；其他卡牌规则见卡面。'),
+h('li',null,'每位旅伴起始资金 15000。途经起点领取 1500；返回起点事件不领奖。高铁免费直达下一座高铁站，不递归触发、不再发200补贴，高铁跨起点也不领奖。旅行商店（含旧版公园）随机赠送旅行卡，手牌最多12张。'),
+h('li',null,'自己的回合可从目的地手记或「房产管理」选择任意自有房产抵押变现：floor((原地价 + 当前等级 × 升级价) / 2)。抵押会永久失去产权、建筑归零，不可赎回。旧版已抵押资产不能重复变现，建议新开房体验新规则。欠款时仅可抵押或出售等级筹款，现金足额自动结清并回到落地阶段，也可手动结清或确认破产。'),
+h('li',null,'精准骰子可选 1～6 步。出狱卡仅在自己本次坐牢的落地阶段、结束停留前使用，清除下次轮空；不必先掷骰、不占也不受每回合一张策略卡限制。事件弹窗关闭后到旅行锦囊使用；其他卡牌规则见卡面。'),
 h('li',null,'集城市印章，走过城市奇遇。游戏没有回合上限，只有未破产旅伴剩下一位时结算，具体资产排名由房主客户端公布。')),
 h('div',{className:'notice'},'请保持页面打开。客户端通过 MQTT 发送心跳；关闭页面、断开连接或网络中断会停止心跳，离线后房间暂停。刷新同一客户端可使用本地凭证恢复。不要分享登录凭证。'));
     const header=h('header',{className:'header'},h('div',{className:'brand'},h('div',{className:'brand-icon','aria-hidden':true},'⚄'),
 h('div',null,h('h1',null,'骰游中国：城市合伙人'),
 h('p',null,'DICE TOUR · CHINA'))),
-h('div',{className:'row'},h('span',{className:'badge version-badge'},'0.4.0'),auth&&h('span',{className:'badge',role:'status'},h('span',{className:'dot '+(connection==='online'?'':connection==='error'?'bad':'warn')}),connection==='online'?'实时连线':connection==='error'?'重连中':'连接中'),
+h('div',{className:'row'},h('span',{className:'badge version-badge'},'0.5.0'),auth&&h('span',{className:'badge',role:'status'},h('span',{className:'dot '+(connection==='online'?'':connection==='error'?'bad':'warn')}),connection==='online'?'实时连线':connection==='error'?'重连中':'连接中'),
 h('button',{className:'quiet optional',onClick:()=>setModal('rules')},'玩法指南'),auth&&h('button',{className:'quiet',onClick:()=>setModal('disconnect')},'断开'),embedded&&onClose&&h('button',{'aria-label':'收起城市漫游（保留在线）',className:'quiet',onClick:()=>setModal('close')},'收起')));
     function renderLobby(){return h('main',{className:'lobby'},h('section',{className:'hero','aria-label':'城市漫游介绍'},h('div',{className:'eyebrow'},'一枚骰子 · 八座城 · 真实好友'),
 h('h2',null,'把日常暂停，',h('br'),'让旅程开始。'),
@@ -207,7 +215,7 @@ h('button',{onClick:()=>setModal('rules')},'阅读完整指南')))));}
 h('span',{className:'badge'},'第 '+(room.round||1)+' 轮 · 不限回合')),
 h('div',{className:'board'},route.map((t,i)=>{const city=cities[t.city],p=room.properties?.[t.id],occupants=players.filter(p=>!p.bankrupt&&Number(p.position)===Number(t.id));return h('button',{key:t.id,className:'tile'+(p?.ownerId?' owned':'')+(p?.mortgaged?' mortgaged':'')+(String(selected)===String(t.id)?' selected':'')+(Number(me?.position)===Number(t.id)?' here':''),style:{...boardPlace(i),'--city':city?.color,'--owner':p?.ownerId?playerColor(p.ownerId):undefined},onClick:()=>setSelected(t.id),onPointerDown:e=>{touchInput.current=true;setFocused(null);if(e.pointerType==='touch')setHovered(null);},onPointerEnter:e=>{if(e.pointerType!=='touch'){setHovered(t.id);setDismissed(false);}},onPointerLeave:()=>setHovered(null),onFocus:()=>{if(!touchInput.current){setFocused(t.id);setDismissed(false);}},onBlur:()=>setFocused(null),onKeyDown:e=>{touchInput.current=false;if(e.key==='Escape'){setDismissed(true);e.stopPropagation();}else{setFocused(t.id);setDismissed(false);}},'aria-describedby':showPreview&&String(preview.tile.id)===String(t.id)?tooltipId:undefined,'aria-pressed':String(selected)===String(t.id),'aria-label':t.name+(city?'，'+city.name:'')+(t.price?'，价格'+money(t.price):'')+(p?.ownerId?'，'+(players.find(x=>x.id===p.ownerId)?.name||'已购入')+'的地标':'')+(occupants.length?'，'+occupants.map(x=>x.name).join('、')+'在此':'')},h('span',{className:'tile-icon','aria-hidden':true},city?.icon||icons[t.type]||'📍'),
 h('span',{className:'tile-name'},t.name),
-h('span',{className:'tile-price'},p?.mortgaged?'已抵押':p?.ownerId?'Lv.'+(p.level||0):t.price?money(t.price):{start:'途经补给',event:'未知惊喜',station:'下一站',shop:'旅行好物',park:'慢享时光'}[t.type]),p?.ownerId&&h('span',{className:'tile-owner',style:{background:playerColor(p.ownerId)}}));}),
+h('span',{className:'tile-price'},p?.mortgaged?'已抵押':p?.ownerId?'Lv.'+(p.level||0):t.price?money(t.price):{start:'途经补给',event:'未知惊喜',station:'下一站',shop:'旅行好物',park:'旅行好物'}[t.type]),p?.ownerId&&h('span',{className:'tile-owner',style:{background:playerColor(p.ownerId)}}));}),
 h('div',{className:'pawn-overlay','aria-label':'旅伴棋子'},players.filter(p=>!p.bankrupt).map((p,i)=>h('div',{key:p.id,className:'moving-pawn',style:pawnPosition(positions[p.id]??p.position,players.indexOf(p))},h(Traveler,{color:playerColor(p.id),label:p.name+'，第 '+(Number(positions[p.id]??p.position)+1)+' 站'})))),
 h('div',{className:'board-center'},h('div',{className:'center-orbit'}),
 h(Dice,{value:displayDice,rolling}),
@@ -226,32 +234,39 @@ h('span',null,'房间 '+room.code+' · '+players.length+' 人同行')));}
 h('span',{className:'small muted'},'资产实时同步')),players.map((p,i)=>h('div',{key:p.id,className:'player'+(p.id===room.turnPlayerId?' turn':'')},h('div',{className:'avatar',style:{opacity:p.bankrupt?.4:1}},h(Traveler,{color:colors[i],label:p.name})),
 h('div',{className:'grow'},h('div',{className:'player-name'},p.name,p.id===me?.id?'（你）':''),
 h('div',{className:'player-meta'},p.bankrupt?'已结束旅程':(p.online?'在线':'离线')+(p.skipTurns?' · 坐牢：下次轮空':'')+(p.extraRolls?' · 额外掷骰 '+p.extraRolls+' 次':'')+' · 印章 '+(p.stamps?.length||0)+' / 8 · 卡 '+(p.cards?.length??p.cardCount??0))),
-h('div',null,h('div',{className:'player-cash'},money(p.cash)),p.id===room.turnPlayerId&&h('div',{className:'small muted',style:{textAlign:'right'}},'当前回合')))) );}
+h('div',null,h('div',{className:'player-cash'},'现金 '+money(p.cash)),h('div',{className:'player-meta'},'资产总额 '+money(playerNetWorth(room,p,route))),p.id===room.turnPlayerId&&h('div',{className:'small muted',style:{textAlign:'right'}},'当前回合')))) );}
     function renderTile(){if(!tile)return null;const city=cities[tile.city];return h('section',{className:'panel notes-panel'},h('div',{className:'section-head'},h('h2',null,'目的地手记'),
 h('span',{className:'small muted'},'第 '+(Number(tile.id)+1)+' 站')),
 h('div',{className:'tile-detail'},h('div',{className:'tile-detail-icon','aria-hidden':true},city?.icon||icons[tile.type]),
 h('div',null,h('h3',null,tile.name),
-h('p',{className:'small muted'},city?city.name+' · 城市地标':{start:'新旅程的起点',event:'一封来自城市的惊喜',station:'沿着铁轨奔向远方',shop:'为旅途备一点好物',park:'把脚步交给风'}[tile.type]))),tile.type==='property'?h(React.Fragment,null,h('div',{className:'facts'},h('div',null,'购入价格',h('strong',null,money(tile.price))),
+h('p',{className:'small muted'},city?city.name+' · 城市地标':{start:'新旅程的起点',event:'一封来自城市的惊喜',station:'免费直达下一座高铁站 · 不递归、不发200、跨起点无奖励',shop:'旅行商店 · 随机旅行卡',park:'旅行商店 · 随机旅行卡'}[tile.type]))),tile.type==='property'?h(React.Fragment,null,h('div',{className:'facts'},h('div',null,'购入价格',h('strong',null,money(tile.price))),
 h('div',null,'升级费用',h('strong',null,money(tile.upgradeCost))),
 h('div',null,'当前实租',h('strong',null,money(detail.rent))),
 h('div',null,'同城倍率',h('strong',null,detail.cityMultiplier+' 倍')),
 h('div',null,'地标等级',h('strong',null,'Lv.'+detail.level)),
-h('div',null,'当前状态',h('strong',null,prop?.mortgaged?'已抵押':owner?owner.name+' · Lv.'+(prop.level||0):'等待收藏'))),prop?.ownerId===me?.id&&h('div',{className:'action-grid'},actionButton('抵押','mortgage',{tileId:tile.id},{disabled:!canAct||!!prop.mortgaged||prop.level>0}),actionButton('赎回','redeem',{tileId:tile.id},{disabled:!canAct||!prop.mortgaged}),actionButton('出售等级','sellLevel',{tileId:tile.id},{disabled:!canAct||!(prop.level>0)})),
-h('p',{className:'small muted',style:{marginTop:10}},'购买/升级需在当前地标的落地阶段进行。抵押前须先出售全部建筑等级；财务操作仅在自己的回合可用，规则以房主客户端为准。')):h('p',{className:'small muted'},'抵达时由房主客户端处理该站效果。留意旅行动态，看看这一次发生什么。'));}
+h('div',null,'当前状态',h('strong',null,prop?.mortgaged?'已抵押':owner?owner.name+' · Lv.'+(prop.level||0):'等待收藏'))),prop?.ownerId===me?.id&&h('div',{className:'action-grid'},h('button',{disabled:!canFinance||!!prop.mortgaged,onClick:()=>setModal({kind:'mortgage',tileId:tile.id})},'抵押变现 '+money(detail.liquidationValue)),actionButton('出售等级','sellLevel',{tileId:tile.id},{disabled:!canFinance||!!prop.mortgaged||!(prop.level>0)})),
+prop?.mortgaged&&h('p',{className:'notice'},'旧版已抵押资产不能重复变现，建议新开房体验新规则；欠款时仍可声明破产。'),
+h('p',{className:'small muted',style:{marginTop:10}},'购买/升级需在当前地标的落地阶段进行。抵押按原地价和现有建筑总价折半变现，永久失去产权、建筑归零且不可赎回；可在房产管理选择其他自有房产。')):h('p',{className:'small muted'},'抵达时由房主客户端处理该站效果。留意旅行动态，看看这一次发生什么。'));}
+    function renderDebt(){if(!debt)return null;const debtor=players.find(p=>p.id===debt.playerId),recipient=players.find(p=>p.id===debt.recipientId);return h('section',{className:'panel stack',role:'status','aria-label':'欠款处理'},h('h2',null,(debtor?.name||'旅伴')+' · 待清偿欠款'),h('p',null,'收款方：'+(recipient?.name||'银行')),h('div',{className:'facts'},h('div',null,'应付',h('strong',null,money(debt.amount))),h('div',null,'现金',h('strong',null,money(debtor?.cash))),h('div',null,'缺口',h('strong',null,money(Math.max(0,debt.amount-(debtor?.cash||0)))))),h('p',{className:'small muted'},'请选择自有地产抵押或出售等级；现金足额会自动结清并恢复落地阶段。欠款期间不可掷骰、购地、结束停留或使用卡牌。'),myDebt&&h('div',{className:'row'},h('button',{disabled:!canFinance,onClick:()=>setModal('properties')},'房产管理 · 筹款'),actionButton('结清欠款','settleDebt',{}, {primary:true,disabled:!canFinance||(me?.cash||0)<debt.amount}),h('button',{className:'danger',disabled:!canFinance,onClick:()=>setModal('bankruptcy')},'声明破产')));}
+    function renderPropertyManager(){const valid=ownedPropertyAssets(room,me?.id,route);const legacy=route.filter(t=>t.type==='property'&&room.properties?.[t.id]?.ownerId===me?.id&&room.properties[t.id].mortgaged);return h('div',{className:'stack'},h('div',{className:'notice',role:'status'},'当前现金 '+money(me?.cash)+(myDebt?' · 待还 '+money(debt.amount)+' · 缺口 '+money(Math.max(0,debt.amount-(me?.cash||0))):' · 当前无待清偿欠款，无需继续筹款。')),h('p',{className:'small muted'},'按房产面值计算，不受购地优惠影响。变现后永久失去产权，建筑归零，不可赎回。'),valid.length||legacy.length?valid.map(a=>h('section',{className:'panel stack',key:a.tile.id},h('h3',null,a.tile.name+' · Lv.'+a.level),h('p',{className:'small'},'购入原价 '+money(a.purchasePrice)+' · 建设价 '+money(a.constructionValue)+'（每级 '+money(a.tile.upgradeCost)+'）'),h('strong',null,'可变现金额 '+money(a.liquidationValue)),h('div',{className:'row'},h('button',{disabled:!canFinance,onClick:()=>setModal({kind:'mortgage',tileId:a.tile.id,back:'properties'})},'抵押变现'),actionButton('出售等级','sellLevel',{tileId:a.tile.id},{disabled:!canFinance||a.level<1})))):h('p',null,'暂无可变现房产。'),legacy.map(t=>h('section',{className:'panel stack',key:t.id},h('h3',null,t.name+' · Lv.'+(room.properties[t.id].level||0)),h('p',null,'购入原价 '+money(t.price)+' · 建设价 '+money((room.properties[t.id].level||0)*(t.upgradeCost||0))+' · 可变现金额 '+money(0)),h('button',{disabled:true},'旧版已抵押 · 不可重复变现'),h('p',{className:'small muted'},'建议新开房体验新规则；欠款时仍可声明破产。'))));}
     function renderCards(){const hand=me?.cards||[];return h('section',{className:'panel cards-panel'},h('div',{className:'section-head'},h('h2',null,'旅行锦囊'),
 h('span',{className:'small muted'},hand.length+' 张')),hand.length?h('div',{className:'cards'},hand.map((entry,i)=>{const id=typeof entry==='string'?entry:entry.cardId||entry.id;const c=cardsById[id]||{name:id,description:'效果由房主客户端判定'};return h('div',{key:id+'-'+i,className:'card'},h('span',{className:'card-icon','aria-hidden':true},cardIcons[id]||'🎫'),
 h('div',{className:'grow'},h('strong',null,c.name),
 h('p',null,c.description||c.desc)),
 h('button',{disabled:!canAct||(id==='jail_free'?(room.phase!=='land'||!(me.skipTurns>0)):(room.phase!=='roll'||room.cardUsed)),'aria-label':'使用'+c.name,onClick:()=>id==='precise'?(setSteps(1),setModal('precise')):act('useCard',{cardId:id})},id==='jail_free'?'使用出狱卡':'使用'));})):h('p',{className:'small muted'},'背包轻轻，旅途长长。到旅行商店可以随机获得一张旅行卡。'));}
-    function renderGame(){return h('main',{className:'game-layout'},h('div',{className:'stack'},renderBoard(),offline&&h('div',{className:'notice',role:'status'},'⏸ 有旅伴离线，当前对局暂停。请让对方重新打开原客户端恢复连接；不要重复创建角色。'),room.status==='finished'&&h('div',{className:'panel'},h('div',{className:'row between'},h('div',null,h('h2',null,'山水有相逢，下次再同行'),
+    function renderGame(){return h('main',{className:'game-layout'},h('div',{className:'stack'},renderBoard(),renderDebt(),offline&&h('div',{className:'notice',role:'status'},'⏸ 有旅伴离线，当前对局暂停。请让对方重新打开原客户端恢复连接；不要重复创建角色。'),room.status==='finished'&&h('div',{className:'panel'},h('div',{className:'row between'},h('div',null,h('h2',null,'山水有相逢，下次再同行'),
 h('p',{className:'muted small'},'本局已结算，旅行记录仍可查看。')),
 h('button',{className:'primary',onClick:()=>setModal('results')},'查看成绩'))),
-h('div',{className:'row between'},h('button',{className:'quiet',onClick:()=>setModal('rules')},'✦ 玩法与连接说明'),room.status==='playing'&&h('button',{className:'quiet danger',disabled:locked||!me||me.bankrupt||connection!=='online',onClick:()=>setModal('surrender')},'结束我的旅程'))),
+h('div',{className:'row between'},h('button',{className:'quiet',onClick:()=>setModal('rules')},'✦ 玩法与连接说明'),me&&!me.bankrupt&&h('button',{disabled:locked,onClick:()=>setModal('properties')},'房产管理'),room.status==='playing'&&h('button',{className:'quiet danger',disabled:locked||!me||me.bankrupt||connection!=='online',onClick:()=>setModal('surrender')},'结束我的旅程'))),
 h('aside',{className:'side'},renderPlayers(),
 h('section',{className:'panel logs-panel'},h('div',{className:'section-head'},h('h2',null,'旅行动态'),
 h('span',{className:'small muted'},'LIVE JOURNAL')),
 h('div',{className:'logs','aria-label':'旅行日志'},(room.logs||[]).slice(-30).reverse().map((log,i)=>h('p',{className:'log',key:i},typeof log==='string'?log:log.text)),!room.logs?.length&&h('p',null,'旅行故事即将开始。'))),renderCards(),renderTile()) );}
-    function renderModal(){if(!modal)return null;const close=()=>setModal(null);if(modal==='invite')return h(Modal,{title:'手动复制完整邀请',onClose:close},h('input',{value:invite,readOnly:true,onFocus:e=>e.target.select()}),
+    function renderModal(){if(!modal)return null;const close=()=>setModal(null);
+      if(modal==='properties')return h(Modal,{title:'房产管理',onClose:close,footer:h('button',{onClick:close},'返回棋盘')},renderPropertyManager());
+      if(modal?.kind==='mortgage'){const info=tileDetails(room,modal.tileId,route);const valid=info?.property?.ownerId===me?.id&&!info.mortgaged;const cancel=()=>setModal(modal.back||null);return h(Modal,{title:'确认抵押变现？',onClose:cancel,footer:h(React.Fragment,null,h('button',{onClick:cancel},'暂不变现'),h('button',{className:'danger',disabled:!canFinance||!valid,onClick:()=>{if(!canFinance||!valid||eventPopup)return;close();act('mortgage',{tileId:info.tile.id});}},'确认变现 '+money(valid?liquidationValue(info.tile,info.property):0)))},h('div',{className:'stack'},h('h3',null,info?.tile.name||'房产已变更'),h('p',null,'可获得现金 '+money(valid?liquidationValue(info.tile,info.property):0)),h('p',{className:'notice'},'此操作不可撤销：永久失去产权，建筑归零。房产将恢复无主，可被其他旅伴购买；不提供赎回。'),!valid&&h('p',{className:'danger'},'该房产已不属于你或为旧版已抵押资产，不能重复变现。')));}
+      if(modal==='bankruptcy')return h(Modal,{title:'确认声明破产？',onClose:close,footer:h(React.Fragment,null,h('button',{onClick:close},'继续筹款'),h('button',{className:'danger',disabled:!canFinance||!myDebt,onClick:()=>{if(!canFinance||!myDebt)return;close();act('declareBankruptcy');}},'确认破产'))},h('p',null,'声明破产将结束你的本局旅程并清理房产和欠款，不能撤销。旧版已抵押资产无法重复变现，但不影响声明破产。'));
+      if(modal==='invite')return h(Modal,{title:'手动复制完整邀请',onClose:close},h('input',{value:invite,readOnly:true,onFocus:e=>e.target.select()}),
 h('p',null,'仅私下发送给朋友。朋友须另有客户端；localhost 不是远程地址。'));if(modal==='rules')return h(Modal,{title:'城市漫游 · 旅行指南',onClose:close,footer:h('button',{className:'primary',onClick:close},'知道了，出发吧')},renderRules());if(modal==='disconnect')return h(Modal,{title:'确认断开这趟旅程？',onClose:close,footer:h(React.Fragment,null,h('button',{onClick:close},'继续保持连接'),
 h('button',{className:'danger',onClick:disconnect},'保留存档并断开'))},h('div',{className:'rules'},h('p',null,'这会停止本设备心跳并保留本地身份存档，不会自动退出房间或结束角色。可以在同一浏览器中恢复身份。'),
 h('p',null,'在进行中的对局里，离线会让房间暂停，影响所有旅伴。如果只是暂时离开，请保持页面打开。')));if(modal==='close')return h(Modal,{title:'收起游戏面板？',onClose:close,footer:h(React.Fragment,null,h('button',{onClick:close},'继续旅行'),
@@ -261,7 +276,7 @@ h('button',{className:'primary',disabled:!canAct||room.phase!=='roll'||room.card
 h('div',{className:'steps','aria-label':'选择步数'},Array.from({length:6},(_,i)=>h('button',{key:i,className:steps===i+1?'active':'','aria-pressed':steps===i+1,onClick:()=>setSteps(i+1)},i+1))));if(modal==='results'){const ranks=room.rankings||players;return h(Modal,{title:'这一程，我们的城市记忆',onClose:close,footer:h('button',{className:'primary',onClick:close},'留在这里看看')},h('div',{className:'stack'},h('p',{className:'muted small'},room.rankings?'最终排名由房主客户端结算。':'最终资产明细尚未返回，以下展示旅伴当前信息（不代表排名）。'),ranks.map((r,i)=>{const p=players.find(p=>p.id===(r.playerId||r.id))||r;return h('div',{className:'ranking',key:i},h('strong',null,room.rankings?'第 '+(r.rank||i+1)+' 名':'✦'),
 h('div',{className:'grow'},h('h3',null,r.name||p.name),
 h('p',{className:'small muted'},'城市印章 '+(p.stamps?.length||0)+' / 8')),
-h('strong',null,money(r.netWorth??r.totalAssets??p.cash)));})));}return null;}
+h('strong',null,money(r.netWorth??r.totalAssets??playerNetWorth(room,p,route))));})));}return null;}
     return h('div',{className:'dtc'+(room&&room.status!=='lobby'?' in-game':''),onKeyDownCapture:e=>{touchInput.current=false;if(e.key==='Escape')setDismissed(true);}}, h('style',null,GAME_CSS),header,(error||notice||connection==='error')&&h('div',{className:'toast'},error&&h('div',{className:'notice error',role:'alert'},h('div',{className:'row between'},h('span',{className:'grow'},error),
 h('button',{'aria-label':'关闭错误提示',className:'quiet',onClick:()=>setError('')},'✕'))),connection==='error'&&h('div',{className:'notice error',role:'status'},'网络中断，操作已暂停。自动重连可能已超时；可点击恢复连接，不会自动重试行动。'+notice,h('button',{className:'quiet',disabled:busy||!saved,onClick:resumeSaved},'恢复连接')),notice&&connection!=='error'&&h('div',{className:'notice',role:'status'},h('div',{className:'row between'},h('span',{className:'grow'},notice),
 h('button',{'aria-label':'关闭旅行提示',className:'quiet',onClick:()=>setNotice('')},'✕')))),!auth?renderLobby():!room?h('main',{className:'panel stack',style:{maxWidth:580,margin:'40px auto'}},h('h2',null,'正在恢复你的旅程…'),

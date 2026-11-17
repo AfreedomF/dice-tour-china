@@ -9,7 +9,7 @@ const secretOf = s => { if (typeof s !== 'string' || !/^[a-f0-9]{32,128}$/.test(
 const codeOf = c => { c = String(c); if (!/^\d{6}$/.test(c)) throw error('Room code must contain six digits','INVALID_INPUT'); return c; };
 // Convenience mode explicitly has no room-code secrecy: do not call this a password.
 const codeKey = code => digest('dice-tour/code-only/v1:' + code);
-const actionTypes = new Set(['ready','start','roll','buy','upgrade','skip','end','useCard','mortgage','redeem','sellLevel','surrender']);
+const actionTypes = new Set(['ready','start','roll','buy','upgrade','skip','end','useCard','mortgage','redeem','sellLevel','surrender','settleDebt','declareBankruptcy']);
 const RECEIPTS = 256;
 const requestDigest = (kind, body) => digest({kind,body:kind === 'action' ? {action:body?.action} : body});
 

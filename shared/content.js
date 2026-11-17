@@ -9,8 +9,8 @@ export const CITIES = [
   {id:'xiamen',name:'厦门',color:'#d4a24c',icon:'🌊'}
 ];
 const landmarks = [['故宫','天坛','颐和园'],['兵马俑','大雁塔','古城墙'],['宽窄巷子','武侯祠','熊猫基地'],['洪崖洞','解放碑','磁器口'],['广州塔','沙面','陈家祠'],['外滩','豫园','陆家嘴'],['西湖','灵隐寺','西溪湿地'],['鼓浪屿','南普陀','环岛路']];
-const functions = ['start','event','station','event','shop','event','station','park'];
-const names = ['旅程起点','城市奇遇','高铁驿站','街巷奇遇','旅行商店','滨江奇遇','高铁驿站','城市公园'];
+const functions = ['start','event','station','event','shop','event','station','shop'];
+const names = ['旅程起点','城市奇遇','高铁驿站','街巷奇遇','旅行商店','滨江奇遇','高铁驿站','第二旅行商店'];
 export const BOARD = CITIES.flatMap((city,i)=>[
   {id:i*4,type:functions[i],name:names[i]},
   ...landmarks[i].map((name,j)=>({id:i*4+j+1,type:'property',name,city:city.id,price:800+i*120+j*100,upgradeCost:400+i*60,baseRent:100+i*25+j*20}))

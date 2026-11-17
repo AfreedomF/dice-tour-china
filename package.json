@@ -1,6 +1,6 @@
 {
   "name": "@local/dice-tour-china",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "骰游中国：城市合伙人。2/4真人，六位房号直入，MQTT/EMQX联机。",
   "repository": {"type":"git","url":"https://github.com/AfreedomF/dice-tour-china.git"},
   "exports": {".":"./index.js","./client":"./client.js","./locale/*.json":"./locale/*.json","./icon":"./icon.svg"},
