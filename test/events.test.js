@@ -7,14 +7,14 @@ function game(count=2){const r=createRoom('123456',count,'甲',NOW);r.board=stru
 function act(r,p,a,rng=min=>min){return applyAction(r,typeof p==='string'?p:p.id,a,{now:NOW,rng});}
 function end(r){const id=r.turnPlayerId;act(r,id,{type:'skip'});}
 function event(r,kind,amount=5,tile=4){const p=r.players.find(p=>p.id===r.turnPlayerId);p.position=tile-1;const calls=[],values=[1,kind,...(kind<4?[amount]:[])];act(r,p,{type:'roll'},(min,max)=>{calls.push([min,max]);const value=values.shift();assert.ok(value>=min&&value<max,`${value} outside [${min},${max})`);return value;});assert.deepEqual(values,[]);return calls;}
-function ordinary(r){act(r,r.turnPlayerId,{type:'roll'},()=>1);end(r);}
+function ordinary(r){const id=r.turnPlayerId;act(r,id,{type:'roll'},()=>1);if(r.turnPlayerId===id&&r.phase==='land')end(r);}
 
 test('ten event tickets request rng(0,10), including event-only jail-free cards',()=>{
  const kinds=['reward','reward','fine','fine','extra_roll','extra_roll','jail','jail','return_start','jail_free'];
  for(let ticket=0;ticket<10;ticket++){const r=game(),p=r.players[0],cards=[...p.cards],version=r.version+1;const calls=event(r,ticket);assert.deepEqual(calls,[[1,7],[0,10],...(ticket<4?[[5,ticket<2?11:9]]:[])]);assert.equal(r.events.length,1);assert.equal(r.events[0].kind,kinds[ticket]);assert.equal(r.events[0].id,String(version));assert.equal(r.events[0].version,r.version);assert.equal(r.events[0].playerId,p.id);assert.equal(r.events[0].playerName,p.name);assert.ok(r.events[0].title);assert.ok(r.events[0].message);assert.deepEqual(p.cards,ticket===9?[...cards,'jail_free']:cards);}
 });
 test('reward 500..1000 and fine 500..800 include every whole-hundred amount and both boundaries',()=>{
-  for(const kind of [0,2])for(let hundreds=5;hundreds<=(kind===0?10:8);hundreds++){const r=game(),p=r.players[0];event(r,kind,hundreds);const e=r.events[0];assert.equal(e.amount,hundreds*100);assert.equal(e.amount%100,0);assert.equal(p.cash,15000+(kind===0?1:-1)*e.amount);if(kind===2)assert.equal(e.paid,e.amount);else assert.equal(e.paid,undefined);}
+  for(const kind of [0,2])for(let hundreds=5;hundreds<=(kind===0?10:8);hundreds++){const r=game(),p=r.players[0];event(r,kind,hundreds);const e=r.events[0];assert.equal(e.amount,hundreds*100);assert.equal(e.amount%100,0);assert.equal(p.cash,10000+(kind===0?1:-1)*e.amount);if(kind===2)assert.equal(e.paid,e.amount);else assert.equal(e.paid,undefined);}
 });
 test('extra roll waits for skip, consumes one credit, preserves card limit, and grants new landing build',()=>{
   const r=game(),p=r.players[0],other=r.players[1];act(r,p,{type:'useCard',cardId:'discount'});event(r,4);const round=r.round;assert.equal(r.phase,'land');assert.equal(p.extraRolls,1);assert.throws(()=>act(r,p,{type:'roll'}));assert.throws(()=>act(r,p,{type:'end'}));act(r,p,{type:'skip'});assert.equal(r.phase,'roll');assert.equal(r.turnPlayerId,p.id);assert.equal(p.extraRolls,0);assert.equal(r.round,round);assert.equal(r.cardUsed,true);assert.throws(()=>act(r,p,{type:'useCard',cardId:'shield'}));

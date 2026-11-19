@@ -9,7 +9,7 @@ function lobby(count=2){const r=createRoom('654321',count,'甲',NOW);r.board=str
 function act(r,p,a,rng=min=>Math.max(min,1)){return applyAction(r,typeof p==='string'?p:p.id,a,{now:NOW,rng});}
 function game(count=2){const r=lobby(count);for(const p of r.players)act(r,p,{type:'ready',ready:true});act(r,r.hostId,{type:'start'});return r;}
 function end(r){const id=r.turnPlayerId;act(r,id,{type:'skip'});}
-function turn(r,steps=1){const id=r.turnPlayerId;act(r,id,{type:'roll'},(min,max)=>min===1?steps:(max===5?1:min));if(r.status==='playing'&&r.turnPlayerId===id)end(r);}
+function turn(r,steps=1){const id=r.turnPlayerId;act(r,id,{type:'roll'},(min,max)=>min===1?steps:(max===5?1:min));if(r.status==='playing'&&r.turnPlayerId===id&&r.phase==='land')end(r);}
 function rejectUnchanged(r,p,a){const before=structuredClone(r);assert.throws(()=>act(r,p,a),GameError);assert.deepEqual(r,before);}
 function withCrypto(value,run){const descriptor=Object.getOwnPropertyDescriptor(globalThis,'crypto');Object.defineProperty(globalThis,'crypto',{configurable:true,value});try{run();}finally{Object.defineProperty(globalThis,'crypto',descriptor);}}
 
@@ -40,7 +40,7 @@ test('mutating engine contract: caller clone contains even a partially failed ra
 test('one strategy card before roll; failed card use does not consume allowance',()=>{
   const r=game(),p=r.players[0];p.cards=CARDS.filter(c=>c.id!=='jail_free').map(c=>c.id);
   rejectUnchanged(r,p,{type:'useCard',cardId:'precise',steps:0});assert.equal(r.cardUsed,false);
-  act(r,p,{type:'useCard',cardId:'bonus'});assert.equal(p.cash,15500);assert.equal(p.cards.length,4);assert.equal(r.cardUsed,true);
+  act(r,p,{type:'useCard',cardId:'bonus'});assert.equal(p.cash,10500);assert.equal(p.cards.length,4);assert.equal(r.cardUsed,true);
   for(const cardId of p.cards)rejectUnchanged(r,p,{type:'useCard',cardId,steps:2});
   act(r,p,{type:'roll'});for(const cardId of p.cards)rejectUnchanged(r,p,{type:'useCard',cardId,steps:2});
   end(r);assert.equal(r.cardUsed,false);turn(r);act(r,p,{type:'useCard',cardId:'shield'});assert.equal(p.cards.length,3);
@@ -51,7 +51,7 @@ test('precise chooses exactly 1..6 without drawing random dice; slow requests [1
   for(const result of [1,2,3]){const r=game(),p=r.players[0];p.cards=['slow'];act(r,p,{type:'useCard',cardId:'slow'});act(r,p,{type:'roll'},(min,max)=>{assert.deepEqual([min,max],[1,4]);return result;});assert.equal(r.lastDice,result);assert.equal(p.effects.slow,undefined);}
 });
 test('discount survives unused turns, cannot be overwritten, consumed only by successful build',()=>{
-  const r=game(),p=r.players[0];act(r,p,{type:'useCard',cardId:'discount'});act(r,p,{type:'roll'},()=>8);end(r);turn(r);assert.equal(p.effects.discount,true);
+  const r=game(),p=r.players[0];act(r,p,{type:'useCard',cardId:'discount'});act(r,p,{type:'roll'},()=>8);turn(r);assert.equal(p.effects.discount,true);
   p.cards.push('discount');rejectUnchanged(r,p,{type:'useCard',cardId:'discount'});assert.equal(r.cardUsed,false);
   act(r,p,{type:'roll'},()=>1);p.cash=0;rejectUnchanged(r,p,{type:'buy'});assert.equal(p.effects.discount,true);assert.equal(r.buildUsed,false);
   p.cash=15000;act(r,p,{type:'buy'});assert.equal(p.cash,15000-Math.ceil(BOARD[p.position].price/2));assert.equal(p.effects.discount,undefined);assert.equal(r.buildUsed,true);
@@ -68,24 +68,24 @@ test('buy or upgrade only once per landing; selling does not restore build allow
   act(r,p,{type:'sellLevel',tileId:1});rejectUnchanged(r,p,{type:'upgrade'});assert.equal(r.properties[1].level,0);
 });
 test('ownership, mortgage and upgrade cap validation',()=>{
-  const r=game(),p=r.players[0],other=r.players[1];r.properties[1]={ownerId:p.id,level:3,mortgaged:false};act(r,p,{type:'roll'});rejectUnchanged(r,p,{type:'upgrade'});rejectUnchanged(r,p,{type:'buy'});
+  const r=game(),p=r.players[0],other=r.players[1];r.properties[1]={ownerId:p.id,level:3,mortgaged:false};p.position=1;r.phase='land';rejectUnchanged(r,p,{type:'upgrade'});rejectUnchanged(r,p,{type:'buy'});
   for(let n=0;n<3;n++)act(r,p,{type:'sellLevel',tileId:1});rejectUnchanged(r,p,{type:'sellLevel',tileId:1});act(r,p,{type:'mortgage',tileId:1});rejectUnchanged(r,p,{type:'mortgage',tileId:1});rejectUnchanged(r,p,{type:'upgrade'});
   r.properties[2]={ownerId:other.id,level:0,mortgaged:false};for(const type of ['mortgage','redeem','sellLevel'])rejectUnchanged(r,p,{type,tileId:2});
   for(const tileId of [undefined,1.1,'1',-1,99])rejectUnchanged(r,p,{type:'mortgage',tileId});
 });
 test('mortgage credits once; insufficient rent logs real payment, clears debtor and advances',()=>{
   for(const alreadyMortgaged of [false,true]){const r=game(4),p=r.players[0],owner=r.players[1];p.cash=1;r.properties[1]={ownerId:owner.id,level:3,mortgaged:false};r.properties[2]={ownerId:p.id,level:0,mortgaged:alreadyMortgaged};
-    act(r,p,{type:'roll'});assert.equal(r.phase,'debt');if(!alreadyMortgaged)act(r,p,{type:'mortgage',tileId:2});act(r,p,{type:'declareBankruptcy'});const paid=alreadyMortgaged?1:451;assert.equal(owner.cash,15000+paid);assert.equal(p.cash,0);assert.equal(p.bankrupt,true);assert.deepEqual(p.cards,[]);assert.deepEqual(p.effects,{});assert.equal(r.properties[2],undefined);assert.equal(r.turnPlayerId,owner.id);assert.equal(r.phase,'roll');assert.equal(r.status,'playing');
+    act(r,p,{type:'roll'});assert.equal(r.phase,'debt');if(!alreadyMortgaged)act(r,p,{type:'mortgage',tileId:2});act(r,p,{type:'declareBankruptcy'});const paid=alreadyMortgaged?1:451;assert.equal(owner.cash,10000+paid);assert.equal(p.cash,0);assert.equal(p.bankrupt,true);assert.deepEqual(p.cards,[]);assert.deepEqual(p.effects,{});assert.equal(r.properties[2],undefined);assert.equal(r.turnPlayerId,owner.id);assert.equal(r.phase,'roll');assert.equal(r.status,'playing');
     assert.ok(r.logs.some(l=>l.text.includes(`实付租金 ${paid} 元（应付 700 元）`)));rejectUnchanged(r,p,{type:'roll'});
   }
 });
 test('manual whole-deed sale resolves debt without automatic building sales',()=>{
   const r=game(4),p=r.players[0],owner=r.players[1];p.cash=0;r.properties[1]={ownerId:owner.id,level:3,mortgaged:false};r.properties[2]={ownerId:p.id,level:3,mortgaged:false};act(r,p,{type:'roll'});
-  assert.equal(r.phase,'debt');assert.equal(p.cash,0);assert.equal(r.properties[2].level,3);act(r,p,{type:'mortgage',tileId:2});assert.equal(p.bankrupt,false);assert.equal(owner.cash,15700);assert.equal(p.cash,350);assert.equal(r.properties[2],undefined);assert.equal(r.turnPlayerId,p.id);assert.equal(r.phase,'land');
+  assert.equal(r.phase,'debt');assert.equal(p.cash,0);assert.equal(r.properties[2].level,3);act(r,p,{type:'mortgage',tileId:2});assert.equal(p.bankrupt,false);assert.equal(owner.cash,10700);assert.equal(p.cash,350);assert.equal(r.properties[2],undefined);assert.equal(r.turnPlayerId,p.id);assert.equal(r.phase,'land');
 });
 test('city set doubles rent, but mortgaged target earns none and does not consume shield',()=>{
-  const r=game(),p=r.players[0],owner=r.players[1];for(const id of [1,2,3])r.properties[id]={ownerId:owner.id,level:0,mortgaged:false};act(r,p,{type:'roll'});assert.equal(p.cash,14800);assert.equal(owner.cash,15200);
-  const s=game(),q=s.players[0];s.properties[1]={ownerId:s.players[1].id,level:3,mortgaged:true};q.effects.shield=true;act(s,q,{type:'roll'});assert.equal(q.cash,15000);assert.equal(q.effects.shield,true);
+  const r=game(),p=r.players[0],owner=r.players[1];for(const id of [1,2,3])r.properties[id]={ownerId:owner.id,level:0,mortgaged:false};act(r,p,{type:'roll'});assert.equal(p.cash,9800);assert.equal(owner.cash,10200);
+  const s=game(),q=s.players[0];s.properties[1]={ownerId:s.players[1].id,level:3,mortgaged:true};q.effects.shield=true;act(s,q,{type:'roll'});assert.equal(q.cash,10000);assert.equal(q.effects.shield,true);
 });
 test('event debt bankruptcy skips eliminated player and resolves final survivor',()=>{
   const r=game(4),p=r.players[0];p.cash=10;const draws=[4,2,5];act(r,p,{type:'roll'},()=>draws.shift());assert.equal(p.bankrupt,true);assert.equal(r.turnPlayerId,r.players[1].id);assert.equal(r.phase,'roll');
@@ -94,7 +94,7 @@ test('event debt bankruptcy skips eliminated player and resolves final survivor'
 test('last seat bankruptcy wraps round once and never leaves a bankrupt turn',()=>{
   const r=game(4);for(let i=0;i<3;i++)turn(r);const p=r.players[3];p.cash=1;r.properties[1]={ownerId:r.players[0].id,level:3,mortgaged:false};act(r,p,{type:'roll'});assert.equal(r.round,2);assert.equal(r.turnPlayerId,r.players[0].id);assert.equal(r.phase,'roll');
 });
-test('net worth uses liquidation proceeds including buildings; liquidation frees the deed',()=>{const r=game(),p=r.players[0];r.properties[1]={ownerId:p.id,level:2,mortgaged:false};assert.equal(netWorth(r,p),15800);act(r,p,{type:'mortgage',tileId:1});assert.equal(p.cash,15800);assert.equal(netWorth(r,p),15800);assert.equal(r.properties[1],undefined);rejectUnchanged(r,p,{type:'redeem',tileId:1});});
+test('net worth uses liquidation proceeds including buildings; liquidation frees the deed',()=>{const r=game(),p=r.players[0];r.properties[1]={ownerId:p.id,level:2,mortgaged:false};assert.equal(netWorth(r,p),10800);act(r,p,{type:'mortgage',tileId:1});assert.equal(p.cash,10800);assert.equal(netWorth(r,p),10800);assert.equal(r.properties[1],undefined);rejectUnchanged(r,p,{type:'redeem',tileId:1});});
 test('equal net assets share competition rank independent of stamps; bankrupt always bottom',()=>{
  // Restored snapshots can retain assets on eliminated players: finish only
  // once one survivor remains, but preserve the complete ranking comparator.
@@ -105,7 +105,7 @@ for(const count of [2,4])test(`${count}-player deterministic 20-round card/build
   const r=game(count);let completed=0;while(completed<count*20){assert.equal(r.status,'playing');const p=r.players.find(p=>p.id===r.turnPlayerId);assert.equal(p.bankrupt,false);assert.equal(r.phase,'roll');
     // Deterministic exact movement with occasional strategy cards and safe budgets.
     if(p.cards.includes('discount')&&!p.effects.discount)act(r,p,{type:'useCard',cardId:'discount'});
-    act(r,p,{type:'roll'},min=>Math.max(min,1));if(r.status!=='playing'||r.turnPlayerId!==p.id)continue;
+    act(r,p,{type:'roll'},min=>Math.max(min,1));if(r.status!=='playing')break;if(r.turnPlayerId!==p.id||r.phase!=='land'){completed++;continue;}
     const t=BOARD[p.position],v=r.properties[t.id];if(t.type==='property'&&(!v||(v.ownerId===p.id&&!v.mortgaged&&v.level<3))&&p.cash>3000)act(r,p,{type:v?'upgrade':'buy'});
     end(r);completed++;
   }assert.equal(completed,count*20);assert.equal(r.round,21);assert.equal(r.status,'playing');for(const p of r.players.slice(0,-1))act(r,p,{type:'surrender'});assert.equal(r.rankings.length,count);assert.equal(r.turnPlayerId,null);
@@ -123,7 +123,7 @@ test('randomInt rejects biased tail and supports exclusive bounds, negative offs
 test('shop cards cap at 12; event extra rolls never grant cards or suppress rewards',()=>{
   for(const count of [11,12]){const r=game(),p=r.players[0];p.cards=Array(count).fill('bonus');p.position=15;let calls=0;act(r,p,{type:'roll'},()=>++calls===1?1:0);assert.equal(p.cards.length,12);}
   for(const count of [11,12]){const r=game(),p=r.players[0];p.cards=Array(count).fill('bonus');p.position=3;let calls=0;act(r,p,{type:'roll'},()=>++calls===1?1:4);assert.equal(p.cards.length,count);assert.equal(p.extraRolls,1);}
-  const r=game(),p=r.players[0];p.cards=Array(12).fill('bonus');p.position=3;const draws=[1,0,5];act(r,p,{type:'roll'},()=>draws.shift());assert.equal(p.cash,15500);assert.equal(p.cards.length,12);
+  const r=game(),p=r.players[0];p.cards=Array(12).fill('bonus');p.position=3;const draws=[1,0,5];act(r,p,{type:'roll'},()=>draws.shift());assert.equal(p.cash,10500);assert.equal(p.cards.length,12);
 });
 test('remaining players complete 20 rounds with multiple eliminated seats, including host',()=>{
   const r=game(4);act(r,r.players[0],{type:'surrender'});act(r,r.players[2],{type:'surrender'});let turns=0;

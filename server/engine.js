@@ -5,7 +5,7 @@ export class GameError extends Error {constructor(message,status=400,code='INVAL
 const fail=(text,status=400,code)=>{throw new GameError(text,status,code);};
 const log=(r,text)=>{r.logs.push({text});r.logs=r.logs.slice(-80);};
 function playerName(name){if(typeof name!=='string')fail('请输入昵称');const value=name.trim();if(value.length<1||value.length>20||/[\x00-\x1f\x7f]/.test(value))fail('昵称需为 1～20 个可见字符');return value;}
-export function newPlayer(name,now=Date.now()){name=playerName(name);return {id:randomUUID(),name,cash:15000,position:0,ready:false,online:true,bankrupt:false,stamps:[],cards:['precise','shield','discount'],lastSeen:now,effects:{},extraRolls:0,skipTurns:0};}
+export function newPlayer(name,now=Date.now()){name=playerName(name);return {id:randomUUID(),name,cash:10000,position:0,ready:false,online:true,bankrupt:false,stamps:[],cards:['precise','shield','discount'],lastSeen:now,effects:{},extraRolls:0,skipTurns:0};}
 function shuffledBoard(rng){const board=structuredClone(BOARD);for(let i=board.length-1;i>1;i--){const j=rng(1,i+1);[board[i],board[j]]=[board[j],board[i]];}return board.map((tile,id)=>({...tile,sourceId:tile.id,id}));}
 export function createRoom(code,capacity,name,now=Date.now(),{rng=randomInt}={}) {if(![2,4].includes(capacity))fail('房间仅支持 2 人或 4 人');const p=newPlayer(name,now);return {code,capacity,status:'lobby',version:1,hostId:p.id,round:0,maxRounds:null,board:shuffledBoard(rng),turnPlayerId:null,phase:'roll',debt:null,lastDice:null,lastMove:null,events:[],cardUsed:false,buildUsed:false,players:[p],properties:{},logs:[{text:`${p.name} 创建了房间`}],createdAt:now,updatedAt:now,receipts:[]};}
 export function online(p,now=Date.now()){return now-p.lastSeen<=OFFLINE_MS;}
@@ -35,7 +35,7 @@ function pay(r,p,amount,recipient,reason){if(p.cash<amount&&Object.values(r.prop
 r.debt={playerId:p.id,recipientId:recipient?.id??null,amount,...(reason?{reason}:{}),resumePhase:'land'};r.phase='debt';return null;}
 const paid=transfer(r,p,amount,recipient?.id);if(paid<amount)bankrupt(r,p);return paid;}
 function checkFinish(r){if(r.players.filter(p=>!p.bankrupt).length<=1)finish(r);}
-function land(r,p,rng){const t=(r.board??BOARD)[p.position];log(r,`${p.name} 到达 ${t.name}`);if(t.type==='property'){if(!p.stamps.includes(t.city))p.stamps.push(t.city);const v=r.properties[t.id];if(v&&v.ownerId!==p.id&&!v.mortgaged){const owner=r.players.find(x=>x.id===v.ownerId);let rent=t.baseRent*(1+v.level*2);const cityTiles=(r.board??BOARD).filter(x=>x.city===t.city);if(cityTiles.every(x=>r.properties[x.id]?.ownerId===owner.id))rent*=2;if(p.effects.shield){delete p.effects.shield;log(r,`${p.name} 的免租卡抵挡了 ${rent} 元租金`);}else{const paid=pay(r,p,rent,owner,'租金');log(r,paid===null?`${p.name} 现金不足，待偿租金 ${rent} 元（债权人 ${owner.name}）`:`${p.name} 向 ${owner.name} 支付租金 ${paid} 元${paid<rent?`（应付 ${rent} 元）`:''}`);}}}
+function land(r,p,rng){let autoHandoff=false;const t=(r.board??BOARD)[p.position];log(r,`${p.name} 到达 ${t.name}`);if(t.type==='property'){if(!p.stamps.includes(t.city))p.stamps.push(t.city);const v=r.properties[t.id];autoHandoff=v?.ownerId===p.id&&v.level===3;if(v&&v.ownerId!==p.id&&!v.mortgaged){const owner=r.players.find(x=>x.id===v.ownerId);let rent=t.baseRent*(1+v.level*2);const cityTiles=(r.board??BOARD).filter(x=>x.city===t.city);if(cityTiles.every(x=>r.properties[x.id]?.ownerId===owner.id))rent*=2;if(p.effects.shield){delete p.effects.shield;log(r,`${p.name} 的免租卡抵挡了 ${rent} 元租金`);}else{const paid=pay(r,p,rent,owner,'租金');log(r,paid===null?`${p.name} 现金不足，待偿租金 ${rent} 元（债权人 ${owner.name}）`:`${p.name} 向 ${owner.name} 支付租金 ${paid} 元${paid<rent?`（应付 ${rent} 元）`:''}`);}}}
 else if(t.type==='event'){
 const draw=rng(0,10),version=r.version+1;
 const event={id:String(version),playerId:p.id,playerName:p.name,kind:['reward','reward','fine','fine','extra_roll','extra_roll','jail','jail','return_start','jail_free'][draw],title:'',message:'',version};
@@ -45,11 +45,11 @@ else if(draw<6){event.title='再掷一次';p.extraRolls=(p.extraRolls??0)+1;even
 else if(draw<8){event.title='坐牢轮空';p.skipTurns=1;event.message=`${p.name} 坐牢，下次轮到时跳过一个回合，可在本次停留使用出狱卡`;}
 else if(draw===8){event.title='返回起点';p.position=0;p.extraRolls=0;event.message=`${p.name} 返回起点，不领取经过起点奖励，立即交给下一位玩家`;}
 else{event.title='获得出狱卡';event.granted=p.cards.length<12;if(event.granted)p.cards.push('jail_free');event.message=event.granted?`${p.name} 获得一张出狱卡`:`${p.name} 手牌已满，未获得出狱卡`;}
-r.events=[...(r.events??[]),event].slice(-20);log(r,event.message);if(draw===8)next(r);
+r.events=[...(r.events??[]),event].slice(-20);log(r,event.message);if(draw===8)autoHandoff=true;
 }
-else if(t.type==='station'){const board=r.board??BOARD;for(let steps=1;steps<board.length;steps++){const to=(p.position+steps)%board.length;if(board[to].type==='station'){if(p.position+steps>=board.length){p.cash+=1500;log(r,`${p.name} 高铁经过起点，获得 1500 元`);}p.position=to;if(r.lastMove)r.lastMove.transfer='station';log(r,`${p.name} 乘高铁前往 ${board[to].name}；不触发终站落点`);break;}}}
+else if(t.type==='station'){autoHandoff=true;const board=r.board??BOARD;for(let steps=1;steps<board.length;steps++){const to=(p.position+steps)%board.length;if(board[to].type==='station'){if(p.position+steps>=board.length){p.cash+=1500;log(r,`${p.name} 高铁经过起点，获得 1500 元`);}p.position=to;if(r.lastMove)r.lastMove.transfer='station';log(r,`${p.name} 乘高铁前往 ${board[to].name}；不触发终站落点`);break;}}}
 else if(t.type==='shop'||t.type==='park'){if(p.cards.length<12){const shopCards=CARDS.filter(c=>c.id!=='jail_free');p.cards.push(shopCards[rng(0,shopCards.length)].id);log(r,'旅行商店赠送一张旅行卡');}}
-checkFinish(r);if(r.status==='playing'&&p.bankrupt)next(r);}
+checkFinish(r);if(r.status==='playing'&&!r.debt&&(p.bankrupt||autoHandoff)){if(autoHandoff){log(r,`${p.name} ${t.type==='station'?'高铁到站':t.type==='property'?'自有地产已满级':'返回起点'}，自动交给下一位${p.extraRolls>0?'，取消剩余额外掷骰机会':''}`);p.extraRolls=0;}next(r);}}
 // Mutates the supplied room. Persistence/network callers must apply to a clone
 // or use a transaction and discard on error (including exceptions from rng).
 export function applyAction(r,playerId,a,{now=Date.now(),rng=randomInt}={}){

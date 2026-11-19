@@ -44,20 +44,20 @@ for(const {name,stations,from,steps,landed,to,rewards} of [
  {name:'dice landing exactly at zero then transfer gives one bonus',stations:[0,24],from:31,steps:1,landed:0,to:24,rewards:1},
 ])test(`051 rail ${name}`,()=>{
  const r=railGame(stations),p=r.players[0];p.position=from;let calls=0;act(r,p,{type:'roll'},()=>{calls++;return steps;});
- assert.equal(calls,1);assert.equal(p.position,to);assert.equal(p.cash,15000+1500*rewards);assert.equal(bonuses(r),rewards);
+ assert.equal(calls,1);assert.equal(p.position,to);assert.equal(p.cash,10000+1500*rewards);assert.equal(bonuses(r),rewards);
  assert.deepEqual(r.lastMove,{id:r.version,playerId:p.id,from,landed,to,steps,transfer:'station'});
  assert.equal(r.logs.filter(l=>l.text.includes('到达')).length,1);assert.equal(r.logs.filter(l=>l.text.includes('乘高铁')).length,1);
- assert.equal(r.events.length,0);assert.equal(r.phase,'land');assert.equal(r.turnPlayerId,p.id);
+ assert.equal(r.events.length,0);assert.equal(r.phase,'roll');assert.equal(r.turnPlayerId,r.players[1].id);
 });
 
 test('051 a lone station has no destination, bonus, or recursive landing',()=>{
  const r=railGame([24]),p=r.players[0];p.position=23;act(r,p,{type:'roll'},()=>1);
- assert.equal(p.position,24);assert.equal(p.cash,15000);assert.equal(r.lastMove.transfer,undefined);assert.equal(bonuses(r),0);
+ assert.equal(p.position,24);assert.equal(p.cash,10000);assert.equal(r.lastMove.transfer,undefined);assert.equal(bonuses(r),0);
 });
 
 for(const wrap of [false,true])test(`051 return-start event grants no teleport bonus after ${wrap?'wrapping':'non-wrapping'} dice`,()=>{
  const r=game(),p=r.players[0],landed=wrap?1:4;p.position=wrap?31:3;r.board[landed].type='event';
  const draws=[wrap?2:1,8];act(r,p,{type:'roll'},()=>draws.shift());
- assert.equal(p.position,0);assert.equal(p.cash,15000+(wrap?1500:0));assert.equal(bonuses(r),wrap?1:0);
+ assert.equal(p.position,0);assert.equal(p.cash,10000+(wrap?1500:0));assert.equal(bonuses(r),wrap?1:0);
  assert.equal(r.events.at(-1).kind,'return_start');assert.equal(r.turnPlayerId,r.players[1].id);assert.equal(r.phase,'roll');assert.equal(r.lastMove.to,0);
 });

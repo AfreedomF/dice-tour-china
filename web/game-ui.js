@@ -157,7 +157,7 @@ h('button',{'aria-label':'关闭对话框',onClick:onClose,className:'quiet'},'�
 h('ol',null,h('li',null,'房主创建 2 人或 4 人房，朋友填昵称和六位房间号直接加入，无需密码或批准。需使用同款新版客户端与相同 Broker；满员或开局后不再接收新玩家。localhost 不能供异地直接访问。'),
 h('li',null,'轮到你时先用旅行卡（可选），再掷骰。每房棋盘随机排布。随机事件：奖励 500～1000 整百元、罚款 500～800 整百元、再掷一次、坐牢下次轮空各 20%；无奖励返回起点并立刻交棒、获得出狱卡各 10%。额外掷骰仍属于同一回合，不增加策略卡次数。'),
 h('li',null,'落地阶段可购买或升级当前地标，完成后点击「结束停留」直接交给下一位；若有额外掷骰则继续掷骰。返回起点事件立即结束本次停留，不再继续掷骰。准确金额与可用行动由房主客户端校验。'),
-h('li',null,'每位旅伴起始资金 15000。途经起点领取 1500；返回起点事件不领奖。高铁免费直达下一座高铁站，不递归触发、不再发200补贴，高铁跨过起点同样领取1500。旅行商店（含旧版公园）随机赠送旅行卡，手牌最多12张。'),
+h('li',null,'每位旅伴起始资金 10000。途经起点领取 1500；返回起点事件不领奖。高铁免费直达下一座高铁站，抵达后自动交给下一位，不递归触发、不再发200补贴，高铁跨过起点同样领取1500。自己的3级地产落地后也自动交给下一位；这两种自动交棒会取消剩余额外掷骰。落地后才升级到3级仍需结束停留。旅行商店（含旧版公园）随机赠送旅行卡，手牌最多12张。'),
 h('li',null,'自己的回合可从目的地手记或「房产管理」选择任意自有房产抵押变现：floor((原地价 + 当前等级 × 升级价) / 2)。抵押会永久失去产权、建筑归零，不可赎回。旧版已抵押资产不能重复变现，建议新开房体验新规则。欠款时仅可抵押或出售等级筹款，现金足额自动结清并回到落地阶段，也可手动结清或确认破产。'),
 h('li',null,'精准骰子可选 1～6 步。出狱卡仅在自己本次坐牢的落地阶段、结束停留前使用，清除下次轮空；不必先掷骰、不占也不受每回合一张策略卡限制。事件弹窗关闭后到旅行锦囊使用；其他卡牌规则见卡面。'),
 h('li',null,'集城市印章，走过城市奇遇。游戏没有回合上限，只有未破产旅伴剩下一位时结算，具体资产排名由房主客户端公布。')),
@@ -165,7 +165,7 @@ h('div',{className:'notice'},'请保持页面打开。客户端通过 MQTT 发�
     const header=h('header',{className:'header'},h('div',{className:'brand'},h('div',{className:'brand-icon','aria-hidden':true},'⚄'),
 h('div',null,h('h1',null,'骰游中国：城市合伙人'),
 h('p',null,'DICE TOUR · CHINA'))),
-h('div',{className:'row'},h('span',{className:'badge version-badge'},'0.5.1'),auth&&h('span',{className:'badge',role:'status'},h('span',{className:'dot '+(connection==='online'?'':connection==='error'?'bad':'warn')}),connection==='online'?'实时连线':connection==='error'?'重连中':'连接中'),
+h('div',{className:'row'},h('span',{className:'badge version-badge'},'0.5.2'),auth&&h('span',{className:'badge',role:'status'},h('span',{className:'dot '+(connection==='online'?'':connection==='error'?'bad':'warn')}),connection==='online'?'实时连线':connection==='error'?'重连中':'连接中'),
 h('button',{className:'quiet optional',onClick:()=>setModal('rules')},'玩法指南'),auth&&h('button',{className:'quiet',onClick:()=>setModal('disconnect')},'断开'),embedded&&onClose&&h('button',{'aria-label':'收起城市漫游（保留在线）',className:'quiet',onClick:()=>setModal('close')},'收起')));
     function renderLobby(){return h('main',{className:'lobby'},h('section',{className:'hero','aria-label':'城市漫游介绍'},h('div',{className:'eyebrow'},'一枚骰子 · 八座城 · 真实好友'),
 h('h2',null,'把日常暂停，',h('br'),'让旅程开始。'),
