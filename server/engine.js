@@ -10,12 +10,10 @@ function shuffledBoard(rng){const board=structuredClone(BOARD);for(let i=board.l
 export function createRoom(code,capacity,name,now=Date.now(),{rng=randomInt}={}) {if(![2,4].includes(capacity))fail('房间仅支持 2 人或 4 人');const p=newPlayer(name,now);return {code,capacity,status:'lobby',version:1,hostId:p.id,round:0,maxRounds:null,board:shuffledBoard(rng),turnPlayerId:null,phase:'roll',debt:null,lastDice:null,lastMove:null,events:[],cardUsed:false,buildUsed:false,players:[p],properties:{},logs:[{text:`${p.name} 创建了房间`}],createdAt:now,updatedAt:now,receipts:[]};}
 export function online(p,now=Date.now()){return now-p.lastSeen<=OFFLINE_MS;}
 export function publicRoom(r,playerId,now=Date.now()) {return {code:r.code,capacity:r.capacity,status:r.status,version:r.version,hostId:r.hostId,round:r.round,maxRounds:null,board:structuredClone(r.board??BOARD),turnPlayerId:r.turnPlayerId,phase:r.phase,debt:structuredClone(r.debt??null),lastDice:r.lastDice,lastMove:structuredClone(r.lastMove??null),events:structuredClone(r.events??[]),cardUsed:!!r.cardUsed,buildUsed:!!r.buildUsed,players:r.players.map(p=>({id:p.id,name:p.name,cash:p.cash,netWorth:netWorth(r,p),position:p.position,ready:p.ready,online:online(p,now),bankrupt:p.bankrupt,extraRolls:p.extraRolls??0,skipTurns:p.skipTurns??0,stamps:[...p.stamps],...(p.id===playerId?{cards:[...p.cards],effects:{...p.effects}}:{cardCount:p.cards.length})})),properties:structuredClone(r.properties),logs:structuredClone(r.logs),...(r.rankings?{rankings:structuredClone(r.rankings)}:{})};}
-const mortgagePrincipal=t=>Math.floor(t.price/2);
-const redemptionCost=t=>mortgagePrincipal(t)+Math.ceil(mortgagePrincipal(t)/10);
-// Face-value land + full-cost buildings + cash (discounts do not change value).
-// Legacy mortgaged snapshots retain their old redemption liability in valuation;
-// they cannot be liquidated again. Start a new game for freely saleable deeds.
-export function netWorth(r,p){return p.cash+Object.entries(r.properties).reduce((sum,[id,v])=>{if(v.ownerId!==p.id)return sum;const t=(r.board??BOARD)[Number(id)];return sum+t.price+v.level*t.upgradeCost-(v.mortgaged?redemptionCost(t):0);},0);}
+const liquidationValue=(t,v)=>v.mortgaged?0:Math.floor((t.price+v.level*t.upgradeCost)/2);
+// Cash plus each deed's actual liquidation proceeds, rounded per property.
+// Legacy mortgaged deeds cannot yield more cash and carry no redemption debt.
+export function netWorth(r,p){return p.cash+Object.entries(r.properties).reduce((sum,[id,v])=>v.ownerId===p.id?sum+liquidationValue((r.board??BOARD)[Number(id)],v):sum,0);}
 function finish(r){if(r.debt){r.debt=null;r.phase='land';}r.status='finished';r.turnPlayerId=null;r.rankings=r.players.map(p=>({playerId:p.id,name:p.name,netWorth:netWorth(r,p),bankrupt:p.bankrupt,stamps:p.stamps.length})).sort((a,b)=>Number(a.bankrupt)-Number(b.bankrupt)||b.netWorth-a.netWorth);r.rankings.forEach((entry,i,list)=>{const prev=list[i-1];entry.rank=prev&&entry.bankrupt===prev.bankrupt&&entry.netWorth===prev.netWorth?prev.rank:i+1;});log(r,'旅程结束，按净资产结算排名（同资产同名次，破产者列后）');}
 function next(r){const survivors=r.players.filter(p=>!p.bankrupt);if(survivors.length<=1){finish(r);return;}
 const current=r.players.find(p=>p.id===r.turnPlayerId);
@@ -49,7 +47,7 @@ else if(draw===8){event.title='返回起点';p.position=0;p.extraRolls=0;event.m
 else{event.title='获得出狱卡';event.granted=p.cards.length<12;if(event.granted)p.cards.push('jail_free');event.message=event.granted?`${p.name} 获得一张出狱卡`:`${p.name} 手牌已满，未获得出狱卡`;}
 r.events=[...(r.events??[]),event].slice(-20);log(r,event.message);if(draw===8)next(r);
 }
-else if(t.type==='station'){const board=r.board??BOARD;for(let steps=1;steps<board.length;steps++){const to=(p.position+steps)%board.length;if(board[to].type==='station'){p.position=to;if(r.lastMove)r.lastMove.transfer='station';log(r,`${p.name} 乘高铁前往 ${board[to].name}；高铁跨起点也不奖励，不触发终站落点`);break;}}}
+else if(t.type==='station'){const board=r.board??BOARD;for(let steps=1;steps<board.length;steps++){const to=(p.position+steps)%board.length;if(board[to].type==='station'){if(p.position+steps>=board.length){p.cash+=1500;log(r,`${p.name} 高铁经过起点，获得 1500 元`);}p.position=to;if(r.lastMove)r.lastMove.transfer='station';log(r,`${p.name} 乘高铁前往 ${board[to].name}；不触发终站落点`);break;}}}
 else if(t.type==='shop'||t.type==='park'){if(p.cards.length<12){const shopCards=CARDS.filter(c=>c.id!=='jail_free');p.cards.push(shopCards[rng(0,shopCards.length)].id);log(r,'旅行商店赠送一张旅行卡');}}
 checkFinish(r);if(r.status==='playing'&&p.bankrupt)next(r);}
 // Mutates the supplied room. Persistence/network callers must apply to a clone
@@ -75,7 +73,7 @@ else if(a.type==='useCard'){if(r.phase!=='roll')fail('策略卡只能在掷骰�
 else if(a.type==='settleDebt')settleDebt(r,p);
 else if(a.type==='declareBankruptcy'){if(!r.debt||r.debt.playerId!==p.id)fail('仅待偿债务人可以宣布破产',409);abandonDebt(r,p);}
 else if(a.type==='redeem')fail('不再支持赎回；变现后产权已释放，可在下次落点重新购买',409);
-else if(['mortgage','sellLevel'].includes(a.type)){if(!Number.isInteger(a.tileId))fail('tileId 必须是整数');const t=(r.board??BOARD)[a.tileId],v=r.properties[a.tileId];if(!t||!v||v.ownerId!==p.id)fail('你不拥有此地标');if(v.mortgaged)fail('旧存档已抵押房产不可再次变现；建议开启新房间，或宣布破产',409);if(a.type==='mortgage'){const proceeds=Math.floor((t.price+v.level*t.upgradeCost)/2);p.cash+=proceeds;delete r.properties[a.tileId];log(r,`${p.name} 变现 ${t.name} 获得 ${proceeds} 元，产权及建筑释放`);}else{if(v.level<=0)fail('没有可出售的建筑');v.level--;p.cash+=Math.floor(t.upgradeCost/2);log(r,`${p.name} 出售 ${t.name} 一级建筑`);}autoSettle(r,p);}
+else if(['mortgage','sellLevel'].includes(a.type)){if(!Number.isInteger(a.tileId))fail('tileId 必须是整数');const t=(r.board??BOARD)[a.tileId],v=r.properties[a.tileId];if(!t||!v||v.ownerId!==p.id)fail('你不拥有此地标');if(v.mortgaged)fail('旧存档已抵押房产不可再次变现；建议开启新房间，或宣布破产',409);if(a.type==='mortgage'){const proceeds=liquidationValue(t,v);p.cash+=proceeds;delete r.properties[a.tileId];log(r,`${p.name} 变现 ${t.name} 获得 ${proceeds} 元，产权及建筑释放`);}else{if(v.level<=0)fail('没有可出售的建筑');v.level--;p.cash+=Math.floor(t.upgradeCost/2);log(r,`${p.name} 出售 ${t.name} 一级建筑`);}autoSettle(r,p);}
 else fail('未知操作');
 }
 r.version++;r.updatedAt=now;return r;

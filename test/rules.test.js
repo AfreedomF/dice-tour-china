@@ -94,7 +94,7 @@ test('event debt bankruptcy skips eliminated player and resolves final survivor'
 test('last seat bankruptcy wraps round once and never leaves a bankrupt turn',()=>{
   const r=game(4);for(let i=0;i<3;i++)turn(r);const p=r.players[3];p.cash=1;r.properties[1]={ownerId:r.players[0].id,level:3,mortgaged:false};act(r,p,{type:'roll'});assert.equal(r.round,2);assert.equal(r.turnPlayerId,r.players[0].id);assert.equal(r.phase,'roll');
 });
-test('net worth uses face-value buildings; liquidation frees the deed',()=>{const r=game(),p=r.players[0];r.properties[1]={ownerId:p.id,level:2,mortgaged:false};assert.equal(netWorth(r,p),16600);act(r,p,{type:'mortgage',tileId:1});assert.equal(p.cash,15800);assert.equal(netWorth(r,p),15800);assert.equal(r.properties[1],undefined);rejectUnchanged(r,p,{type:'redeem',tileId:1});});
+test('net worth uses liquidation proceeds including buildings; liquidation frees the deed',()=>{const r=game(),p=r.players[0];r.properties[1]={ownerId:p.id,level:2,mortgaged:false};assert.equal(netWorth(r,p),15800);act(r,p,{type:'mortgage',tileId:1});assert.equal(p.cash,15800);assert.equal(netWorth(r,p),15800);assert.equal(r.properties[1],undefined);rejectUnchanged(r,p,{type:'redeem',tileId:1});});
 test('equal net assets share competition rank independent of stamps; bankrupt always bottom',()=>{
  // Restored snapshots can retain assets on eliminated players: finish only
  // once one survivor remains, but preserve the complete ranking comparator.

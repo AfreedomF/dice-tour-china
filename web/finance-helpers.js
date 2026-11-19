@@ -15,5 +15,5 @@ export function ownedPropertyAssets(room, playerId, fallbackBoard = []) {
 }
 export function playerNetWorth(room, player, fallbackBoard = []) {
   if (typeof player?.netWorth === 'number' && Number.isFinite(player.netWorth)) return player.netWorth;
-  return (Number(player?.cash) || 0) + ownedPropertyAssets(room, player?.id, fallbackBoard).reduce((sum, asset) => sum + asset.assetValue, 0);
+  return (Number(player?.cash) || 0) + ownedPropertyAssets(room, player?.id, fallbackBoard).reduce((sum, asset) => sum + asset.liquidationValue, 0);
 }
